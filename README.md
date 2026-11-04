@@ -1,8 +1,38 @@
 # sysinfo — сводка о системе для Linux / Raspberry Pi
 
+[![build](https://github.com/paolosezart/sysinfo/actions/workflows/build.yml/badge.svg)](https://github.com/paolosezart/sysinfo/actions/workflows/build.yml)
+![platform](https://img.shields.io/badge/platform-linux%20%7C%20arm64%20%7C%20armv7%20%7C%20amd64-blue)
+![go](https://img.shields.io/badge/go-1.21%2B-00ADD8)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 Утилита в духе Windows `systeminfo`, но заточена под Linux и Raspberry Pi 4B
-(arm64). Выводит всё в человекочитаемом виде — без симлинков, bind-mount'ов и
-кодов, которые приходится расшифровывать вручную.
+(arm64). Один статический бинарник на Go, без зависимостей — просто скопируй
+на плату и запусти.
+
+## Зачем
+
+`df -h` печатает симлинки и bind-mount'ы, `vcgencmd` выдаёт битовую маску
+троттлинга, а `iw` — коды каналов. Приходится каждый раз лезть в мануалы.
+`sysinfo` собирает всё в одну человекочитаемую сводку: без шума и без кодов,
+которые надо расшифровывать вручную.
+
+## Установка
+
+Скачай готовый бинарник со страницы [Releases](../../releases):
+
+```sh
+# Raspberry Pi 4B / 5 (arm64)
+curl -LO https://github.com/paolosezart/sysinfo/releases/latest/download/sysinfo-linux-arm64
+chmod +x sysinfo-linux-arm64
+./sysinfo-linux-arm64
+```
+
+Или собери сам (нужен Go 1.21+):
+
+```sh
+make arm64     # -> dist/sysinfo-linux-arm64
+make release   # все цели + SHA256SUMS
+```
 
 ## Что показывает
 
@@ -24,9 +54,46 @@
 - **Дисплей** — разъёмы DRM и мониторы, разобранные из EDID: производитель,
   модель, разрешение и частота обновления, размер, серийный номер, год.
 
-## Сборка
+## Пример вывода
 
-Нужен Go 1.21+.
+```
+СИСТЕМА
+  Имя узла: raspberrypi
+  ОС: Debian GNU/Linux 12 (bookworm)
+  Ядро: 6.6.51+rpt-rpi-v8
+  Архитектура: arm64 (64-бит ARM)
+  Плата: Raspberry Pi 4 Model B Rev 1.4
+
+ПРОЦЕССОР
+  Модель: Cortex-A72
+  Ядер / потоков: 4 / 4
+  Текущая частота: 1500 МГц
+  Мин / макс частота: 600 / 1500 МГц
+  Губернатор: ondemand (адаптивно)
+
+ПАМЯТЬ
+  Всего ОЗУ: 7.75 ГиБ
+  Использовано: 1.91 ГиБ (25%)
+  ZRAM (сжатие swap в ОЗУ)
+    Алгоритм сжатия: zstd
+    Коэффициент сжатия: 4.00×
+    В реальности в ОЗУ: 72.0 МиБ
+
+СЕТЬ
+  wlan0 [Wi-Fi]  активен
+      Точка доступа: HomeNet_5G
+      Диапазон: 5 ГГц, канал 36
+      Скорость линка: 433 Мбит/с
+      Сигнал: -58 dBm (84%)
+
+ДАТЧИКИ
+  Температура CPU: 47.8 °C
+  Состояние: норма — троттлинга и просадок питания не было
+```
+
+Полный пример без реального железа: `./sysinfo --demo`.
+
+## Сборка
 
 ```sh
 make arm64     # Raspberry Pi 4/5 и другие 64-битные ARM  -> dist/sysinfo-linux-arm64
@@ -74,3 +141,14 @@ sysinfo --demo          # пример вывода для Raspberry Pi 4B бе�
 | `resolvectl` | актуальные DNS-серверы systemd-resolved     |
 
 Если чего-то нет — секция просто деградирует, утилита не падает.
+
+## Разработка
+
+```sh
+go vet ./...
+go test ./...
+```
+
+Парсеры `/proc` и `/sys` вынесены в отдельные функции, поэтому их можно
+проверять на фикстурах без реального железа — см. `sysinfo_test.go`.
+
