@@ -19,8 +19,13 @@ go vet ./...
 ```
 
 ## Conventions
-- Output is in Russian; keep labels human-readable (no kernel codes).
+- Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`
+  in `i18n.go`. Units are stored language-neutral ("MHz", "Mbps") and localized
+  at render time via `unitLocal`.
+- Keep labels human-readable (no kernel codes).
 - All optional tools (`vcgencmd`, `iw`, `ethtool`, `resolvectl`) degrade
   gracefully — never fatal if missing.
 - Parsers of /proc and /sys are kept as standalone functions so they can be
-  unit-tested against fixtures (see `sysinfo_test.go`).
+  unit-tested against fixtures (see `sysinfo_test.go`, `extra_test.go`).
+- Vendor names come from `usb.ids` and IEEE OUI; downloads set a User-Agent
+  (some mirrors reject the default Go client) and are validated for content.

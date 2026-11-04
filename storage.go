@@ -17,6 +17,9 @@ type Filesystem struct {
 	UsedBytes  uint64
 	FreeBytes  uint64
 	UsedPct    float64
+	Model      string // block device model/vendor, when readable
+	BusSpeed   string // e.g. "SDR104 (UHS-I)" for SD cards
+	SDClass    string // e.g. "Class 10 (10 МБ/с)" when known
 }
 
 // pseudoFS are virtual or otherwise uninteresting filesystems for a
@@ -85,6 +88,7 @@ func collectFilesystems() []Filesystem {
 		if total > 0 {
 			fs.UsedPct = float64(used) / float64(total) * 100
 		}
+		fs.Model, fs.BusSpeed, fs.SDClass = blockDeviceMeta(device)
 		out = append(out, fs)
 	}
 
@@ -92,25 +96,35 @@ func collectFilesystems() []Filesystem {
 	return out
 }
 
+// isSystemMount reports whether a mount point is system plumbing that only
+// clutters a "how much disk space do I have" overview. Real partitions such as
+// /boot, /boot/firmware and /home are kept; nested mounts under /etc, /var,
+// /usr, /run, /dev and the like are skipped.
 func isSystemMount(mount string) bool {
-	// Keep top-level user filesystems (/ , /home , /boot ...) and anything
-	// under the usual user mount points. Everything deeper is nearly always a
-	// bind mount of system plumbing that clutters a `df -h` style overview.
 	trimmed := strings.TrimPrefix(mount, "/")
 	if trimmed == "" {
+		return false // root
+	}
+	top := trimmed
+	if idx := strings.Index(trimmed, "/"); idx >= 0 {
+		top = trimmed[:idx]
+	}
+
+	// Always keep user-facing mount trees, including /boot/firmware.
+	switch top {
+	case "mnt", "media", "data", "srv", "boot", "home", "opt":
 		return false
 	}
-	for _, keep := range []string{"mnt/", "media/", "data/", "srv/"} {
-		if strings.HasPrefix(trimmed, keep) {
-			return false
-		}
+
+	// Everything else at depth 1 is a real top-level filesystem (keep it).
+	if !strings.Contains(trimmed, "/") {
+		return false
 	}
-	if strings.Contains(trimmed, "/") {
+
+	// Deeper mounts under these trees are bind mounts or pseudo-filesystems.
+	switch top {
+	case "etc", "var", "usr", "sys", "proc", "run", "dev", "snap", "tmp":
 		return true
-	}
-	switch trimmed {
-	case "etc", "var", "usr", "sys", "proc", "run", "dev", "snap", "boot":
-		return trimmed != "boot"
 	}
 	return false
 }

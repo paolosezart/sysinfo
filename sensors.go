@@ -48,29 +48,52 @@ type FanInfo struct {
 	RPM  int
 }
 
-// clockLabels maps vcgencmd clock domain codes to human-readable names.
-var clockLabels = map[string]string{
-	"arm":   "Ядро ARM",
-	"core":  "Ядро GPU (core)",
-	"h264":  "H.264",
-	"isp":   "ISP (камера)",
-	"v3d":   "3D-ускоритель (V3D)",
-	"uart":  "UART",
-	"pwm":   "PWM",
-	"emmc":  "eMMC",
-	"pixel": "Пиксельный такт",
-	"vec":   "Векторный процессор",
-	"hdmi":  "HDMI",
-	"dpi":   "DPI",
-	"hevc":  "HEVC",
+// clockLabel maps a vcgencmd clock domain code to a human-readable name.
+func clockLabel(dom string) string {
+	switch dom {
+	case "arm":
+		return L("Ядро ARM", "ARM core")
+	case "core":
+		return L("Ядро GPU (core)", "GPU core")
+	case "h264":
+		return "H.264"
+	case "isp":
+		return L("ISP (камера)", "ISP (camera)")
+	case "v3d":
+		return L("3D-ускоритель (V3D)", "3D accelerator (V3D)")
+	case "uart":
+		return "UART"
+	case "pwm":
+		return "PWM"
+	case "emmc":
+		return "eMMC"
+	case "pixel":
+		return L("Пиксельный такт", "Pixel clock")
+	case "vec":
+		return L("Векторный процессор", "Vector processor")
+	case "hdmi":
+		return "HDMI"
+	case "dpi":
+		return "DPI"
+	case "hevc":
+		return "HEVC"
+	}
+	return dom
 }
 
-// voltLabels maps vcgencmd voltage domains to human-readable names.
-var voltLabels = map[string]string{
-	"core":    "Ядро (core)",
-	"sdram_c": "SDRAM (ядро)",
-	"sdram_i": "SDRAM (I/O)",
-	"sdram_p": "SDRAM (PHY)",
+// voltLabel maps a vcgencmd voltage domain to a human-readable name.
+func voltLabel(dom string) string {
+	switch dom {
+	case "core":
+		return L("Ядро (core)", "Core")
+	case "sdram_c":
+		return L("SDRAM (ядро)", "SDRAM (core)")
+	case "sdram_i":
+		return "SDRAM (I/O)"
+	case "sdram_p":
+		return "SDRAM (PHY)"
+	}
+	return dom
 }
 
 func collectSensors(si SystemInfo) SensorInfo {
@@ -81,20 +104,12 @@ func collectSensors(si SystemInfo) SensorInfo {
 		s.TemperatureC = vcgencmdTemp()
 		for _, dom := range []string{"core", "sdram_c", "sdram_i", "sdram_p"} {
 			if v := vcgencmdVolts(dom); v > 0 {
-				label := voltLabels[dom]
-				if label == "" {
-					label = dom
-				}
-				s.Voltages = append(s.Voltages, SensorValue{Name: label, Value: v, Unit: "В"})
+				s.Voltages = append(s.Voltages, SensorValue{Name: voltLabel(dom), Value: v, Unit: "V"})
 			}
 		}
 		for _, dom := range []string{"arm", "core", "v3d", "h264", "isp", "pixel"} {
 			if v := vcgencmdClockMHz(dom); v > 0 {
-				label := clockLabels[dom]
-				if label == "" {
-					label = dom
-				}
-				s.Clocks = append(s.Clocks, SensorValue{Name: label, Value: v, Unit: "МГц"})
+				s.Clocks = append(s.Clocks, SensorValue{Name: clockLabel(dom), Value: v, Unit: "MHz"})
 			}
 		}
 		s.Throttle = vcgencmdThrottled()
@@ -212,17 +227,17 @@ func humanThermalName(t string) string {
 	lower := strings.ToLower(t)
 	switch {
 	case strings.Contains(lower, "cpu") || strings.Contains(lower, "soc"):
-		return "Процессор (SoC)"
+		return L("Процессор (SoC)", "SoC")
 	case strings.Contains(lower, "gpu"):
 		return "GPU"
 	case strings.Contains(lower, "ddr"):
-		return "Память (DDR)"
+		return L("Память (DDR)", "Memory (DDR)")
 	case strings.Contains(lower, "wifi") || strings.Contains(lower, "wl"):
-		return "Wi-Fi модуль"
+		return L("Wi-Fi модуль", "Wi-Fi module")
 	case strings.Contains(lower, "acpi"):
 		return "ACPI"
 	case strings.Contains(lower, "x86_pkg"):
-		return "Пакет процессора"
+		return L("Пакет процессора", "CPU package")
 	}
 	return t
 }
@@ -247,28 +262,28 @@ func (t *ThrottleState) describe() (now, occurred []string) {
 		return nil, nil
 	}
 	if t.UnderVoltageNow {
-		now = append(now, "пониженное напряжение")
+		now = append(now, L("пониженное напряжение", "undervoltage"))
 	}
 	if t.FreqCappedNow {
-		now = append(now, "частота ограничена")
+		now = append(now, L("частота ограничена", "frequency capped"))
 	}
 	if t.ThrottledNow {
-		now = append(now, "троттлинг (перегрев/питание)")
+		now = append(now, L("троттлинг (перегрев/питание)", "throttling (thermal/power)"))
 	}
 	if t.SoftTempLimitNow {
-		now = append(now, "мягкий температурный лимит")
+		now = append(now, L("мягкий температурный лимит", "soft temperature limit"))
 	}
 	if t.UnderVoltageOccurred {
-		occurred = append(occurred, "пониженное напряжение")
+		occurred = append(occurred, L("пониженное напряжение", "undervoltage"))
 	}
 	if t.FreqCappedOccurred {
-		occurred = append(occurred, "ограничение частоты")
+		occurred = append(occurred, L("ограничение частоты", "frequency capping"))
 	}
 	if t.ThrottledOccurred {
-		occurred = append(occurred, "троттлинг")
+		occurred = append(occurred, L("троттлинг", "throttling"))
 	}
 	if t.SoftTempLimitOccurred {
-		occurred = append(occurred, "мягкий температурный лимит")
+		occurred = append(occurred, L("мягкий температурный лимит", "soft temperature limit"))
 	}
 	return now, occurred
 }

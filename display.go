@@ -32,7 +32,8 @@ type Monitor struct {
 	PreferredWidth  int
 	PreferredHeight int
 	RefreshHz       float64
-	SizeCm          string
+	SizeCmW         float64
+	SizeCmH         float64
 }
 
 func collectDisplayInfo() DisplayInfo {
@@ -111,7 +112,8 @@ func parseEDID(b []byte) *Monitor {
 
 	// Physical size in cm (bytes 21, 22).
 	if b[21] != 0 && b[22] != 0 {
-		m.SizeCm = fmt.Sprintf("%.0f × %.0f см", float64(b[21])/10, float64(b[22])/10)
+		m.SizeCmW = float64(b[21]) / 10
+		m.SizeCmH = float64(b[22]) / 10
 	}
 	return m
 }

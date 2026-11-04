@@ -79,12 +79,12 @@ func TestFreqToBandChannel(t *testing.T) {
 		freq     int
 		band, ch string
 	}{
-		{2412, "2.4 ГГц", "1"},
-		{2437, "2.4 ГГц", "6"},
-		{2484, "2.4 ГГц", "14"},
-		{5180, "5 ГГц", "36"},
-		{5745, "5 ГГц", "149"},
-		{5955, "6 ГГц", "1"},
+		{2412, "2.4", "1"},
+		{2437, "2.4", "6"},
+		{2484, "2.4", "14"},
+		{5180, "5", "36"},
+		{5745, "5", "149"},
+		{5955, "6", "1"},
 		{0, "", ""},
 	}
 	for _, c := range cases {
@@ -187,8 +187,8 @@ func TestParseEDID(t *testing.T) {
 	if m.RefreshHz < 59 || m.RefreshHz > 61 {
 		t.Errorf("refresh = %v, want ~60", m.RefreshHz)
 	}
-	if m.SizeCm != "5 × 3 см" {
-		t.Errorf("size = %q", m.SizeCm)
+	if m.SizeCmW < 5 || m.SizeCmW > 6 || m.SizeCmH < 2 || m.SizeCmH > 3 {
+		t.Errorf("size = %vx%v, want 5x3", m.SizeCmW, m.SizeCmH)
 	}
 }
 

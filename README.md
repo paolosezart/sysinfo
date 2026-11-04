@@ -2,7 +2,7 @@
 
 [![build](https://github.com/paolosezart/sysinfo/actions/workflows/build.yml/badge.svg)](https://github.com/paolosezart/sysinfo/actions/workflows/build.yml)
 ![platform](https://img.shields.io/badge/platform-linux%20%7C%20arm64%20%7C%20armv7%20%7C%20amd64-blue)
-![go](https://img.shields.io/badge/go-1.21%2B-00ADD8)
+![go](https://img.shields.io/badge/go-1.23%2B-00ADD8)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 Утилита в духе Windows `systeminfo`, но заточена под Linux и Raspberry Pi 4B
@@ -44,15 +44,23 @@ make release   # все цели + SHA256SUMS
   алгоритм сжатия, коэффициент, процент занятого, объём в сжатом виде и
   реально занятая в ОЗУ память.
 - **Накопители** — только реальные файловые системы (`/`, `/home`, `/boot`,
-  `/mnt/...`), с прогресс-баром и понятными «занято / свободно / всего».
-- **Сеть** — интерфейсы, IPv4/IPv6, MAC, DNS-серверы и домены поиска;
-  для LAN: скорость линка, дуплекс, наличие кабеля; для Wi-Fi: имя точки
-  доступа, диапазон и канал, скорость линка, ширина полосы, шифрование, сигнал.
+  `/boot/firmware`, `/media/...`), с прогресс-баром, моделью устройства и
+  классом/режимом шины SD-карты (`SDR104`, `Class 10`).
+- **Сеть** — интерфейсы, IPv4/IPv6, MAC, трафик RX/TX, DNS-серверы и домены
+  поиска; шлюз с MAC и вендором; для LAN: скорость линка, дуплекс, наличие
+  кабеля; для Wi-Fi: SSID и BSSID точки доступа, диапазон и канал, скорость
+  линка, ширина полосы, шифрование, сигнал.
 - **Датчики (Raspberry Pi)** — температура, напряжения и такты `vcgencmd`,
   декодированный `get_throttled` (просадки питания/троттлинг: «сейчас» и
   «было с загрузки»), тепловые зоны, вентиляторы.
 - **Дисплей** — разъёмы DRM и мониторы, разобранные из EDID: производитель,
   модель, разрешение и частота обновления, размер, серийный номер, год.
+- **USB** — устройства с классом и протоколом интерфейсов (клавиатура, мышь,
+  накопитель, хаб, аудио, видео), драйвером, скоростью линка и серийником.
+- **Язык** — интерфейс на русском и английском, определяется по локали
+  (`LANG`/`LC_ALL`), принудительно — флагами `--ru` / `--en`.
+- **Базы вендоров** — имена производителей USB и MAC подтягиваются из `usb.ids`
+  и IEEE OUI (`--vendor`, `--oui`); без них показываются только ID.
 
 ## Пример вывода
 
@@ -119,12 +127,20 @@ ssh pi@raspberrypi 'chmod +x sysinfo-linux-arm64 && ./sysinfo-linux-arm64'
 ## Использование
 
 ```
-sysinfo                 # полная сводка (цветной вывод)
-sysinfo --no-color      # без цвета
-sysinfo --json          # машиночитаемый JSON (для скриптов и мониторинга)
-sysinfo --only network  # одна секция: system|cpu|memory|storage|network|sensors|display
-sysinfo --demo          # пример вывода для Raspberry Pi 4B без реального железа
+sysinfo                     # полная сводка (цветной вывод)
+sysinfo --no-color          # без цвета
+sysinfo --json              # машиночитаемый JSON (для скриптов и мониторинга)
+sysinfo --cpu --ram         # только выбранные секции
+sysinfo -sys -c -r -s -n -d -u   # короткие псевдонимы секций
+sysinfo --ru / --en         # принудительный язык
+sysinfo --demo              # пример вывода для Raspberry Pi 4B без железа
+sysinfo --vendor            # скачать базу USB-вендоров (usb.ids)
+sysinfo --oui               # скачать базу MAC-вендоров (IEEE OUI)
+sudo sysinfo --install      # установить в /usr/local/bin/sysinfo
 ```
+
+Секции: `--system`/`-sys`, `--cpu`/`-c`, `--ram`/`-r`, `--storage`/`-s`,
+`--network`/`-n`, `--sensors`, `--display`/`-d`, `--usb`/`-u`.
 
 Переменная окружения `NO_COLOR` также отключает цвет.
 

@@ -22,6 +22,23 @@ type MemoryInfo struct {
 	SwapFreeKB  uint64
 	SwapUsedKB  uint64
 	Zram        []ZramDevice
+	SwapDevices []SwapDevice
+
+	// RAM frequency is only exposed by some SoCs (e.g. via devfreq); zero when
+	// the platform does not report it.
+	RAMCurMHz float64
+	RAMMinMHz float64
+	RAMMaxMHz float64
+}
+
+// SwapDevice is one entry from /proc/swaps.
+type SwapDevice struct {
+	Filename string
+	Type     string // file / partition
+	SizeKB   uint64
+	UsedKB   uint64
+	Priority int
+	Location string // human hint, e.g. "файл подкачки" or the backing device
 }
 
 // ZramDevice holds the human-oriented view of a zram compressed block device.
@@ -56,7 +73,101 @@ func collectMemoryInfo() MemoryInfo {
 	}
 
 	mi.Zram = collectZram()
+	mi.SwapDevices = collectSwapDevices()
+	mi.RAMCurMHz, mi.RAMMinMHz, mi.RAMMaxMHz = ramFrequency()
 	return mi
+}
+
+// collectSwapDevices parses /proc/swaps so the user can see exactly which swap
+// backends exist (a swap file, a partition, zram) and where they live.
+func collectSwapDevices() []SwapDevice {
+	return parseSwapFile("/proc/swaps")
+}
+
+// parseSwapFile reads a /proc/swaps-formatted file.
+func parseSwapFile(path string) []SwapDevice {
+	b, err := readFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []SwapDevice
+	lines := strings.Split(string(b), "\n")
+	for i, line := range lines {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue // header row
+		}
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			continue
+		}
+		sw := SwapDevice{
+			Filename: f[0],
+			Type:     f[1],
+			SizeKB:   parseUint(f[2]),
+			UsedKB:   parseUint(f[3]),
+		}
+		if len(f) >= 5 {
+			sw.Priority = int(parseUint(f[4]))
+		}
+		sw.Location = swapLocation(sw)
+		out = append(out, sw)
+	}
+	return out
+}
+
+// swapLocation describes where a swap backend lives in human terms.
+func swapLocation(sw SwapDevice) string {
+	switch sw.Type {
+	case "partition":
+		if strings.HasPrefix(sw.Filename, "/dev/zram") {
+			return L("ZRAM (сжатие в ОЗУ)", "ZRAM (compressed in RAM)")
+		}
+		return L("раздел диска ", "disk partition ") + sw.Filename
+	case "file":
+		// Try to find which filesystem the swap file lives on.
+		if dev := deviceForPath(sw.Filename); dev != "" {
+			return L("файл на ", "file on ") + dev
+		}
+		return L("файл подкачки", "swap file")
+	}
+	return sw.Type
+}
+
+// ramFrequency tries to read the RAM/DDR clock. Some SoCs (Rockchip, some
+// Allwinner boards) expose a devfreq device named "dmc" or "ddr"; most
+// Raspberry Pi models do not, in which case all values stay zero.
+func ramFrequency() (cur, min, max float64) {
+	candidates := []string{
+		"/sys/class/devfreq/dmc",
+		"/sys/class/devfreq/ddr",
+		"/sys/class/devfreq/*.dmc",
+	}
+	for _, c := range candidates {
+		dirs, _ := filepath.Glob(c)
+		for _, d := range dirs {
+			if v := hzToMHz(readFileTrim(filepath.Join(d, "cur_freq"))); v > 0 {
+				cur = v
+			}
+			if v := hzToMHz(readFileTrim(filepath.Join(d, "min_freq"))); v > 0 {
+				min = v
+			}
+			if v := hzToMHz(readFileTrim(filepath.Join(d, "max_freq"))); v > 0 {
+				max = v
+			}
+			if cur > 0 {
+				return
+			}
+		}
+	}
+	return
+}
+
+// hzToMHz converts a raw hertz value (as reported by devfreq) to MHz.
+func hzToMHz(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	return parseFloat(s) / 1e6
 }
 
 func readMemInfo(path string) map[string]uint64 {

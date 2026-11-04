@@ -51,13 +51,43 @@ func commandExists(name string) bool {
 	return err == nil
 }
 
+// unitLocal translates a neutral unit token (stored in the data model) into the
+// active language for display. Keeping units neutral keeps JSON stable and
+// language-independent.
+func unitLocal(u string) string {
+	switch u {
+	case "V":
+		return L("В", "V")
+	case "MHz":
+		return L("МГц", "MHz")
+	case "GHz":
+		return L("ГГц", "GHz")
+	case "Mbps":
+		return L("Мбит/с", "Mbps")
+	case "Gbps":
+		return L("Гбит/с", "Gbps")
+	case "cm":
+		return L("см", "cm")
+	case "RPM":
+		return L("об/мин", "RPM")
+	case "C":
+		return L("°C", "°C")
+	}
+	return u
+}
+
+// langCode is defined in i18n.go; L() selects between the two variants.
+
 // humanBytes formats a byte count using binary units (KiB, MiB, GiB...).
 func humanBytes(n uint64) string {
 	const unit = 1024
 	if n < unit {
-		return fmt.Sprintf("%d Б", n)
+		return fmt.Sprintf("%d %s", n, L("Б", "B"))
 	}
 	units := []string{"КиБ", "МиБ", "ГиБ", "ТиБ", "ПиБ"}
+	if langCode == "en" {
+		units = []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
+	}
 	val := float64(n)
 	i := -1
 	for val >= unit && i < len(units)-1 {
@@ -71,9 +101,12 @@ func humanBytes(n uint64) string {
 func humanBytesShort(n uint64) string {
 	const unit = 1024
 	if n < unit {
-		return fmt.Sprintf("%d Б", n)
+		return fmt.Sprintf("%d %s", n, L("Б", "B"))
 	}
 	units := []string{"КиБ", "МиБ", "ГиБ", "ТиБ", "ПиБ"}
+	if langCode == "en" {
+		units = []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
+	}
 	val := float64(n)
 	i := -1
 	for val >= unit && i < len(units)-1 {
@@ -95,6 +128,15 @@ func parseUint(s string) uint64 {
 // parseFloat parses a float, returning 0 on error.
 func parseFloat(s string) float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// parseUintHex parses a base-16 unsigned integer, returning 0 on error.
+func parseUintHex(s string) uint64 {
+	v, err := strconv.ParseUint(strings.TrimSpace(s), 16, 64)
 	if err != nil {
 		return 0
 	}
@@ -133,14 +175,14 @@ func humanDuration(d time.Duration) string {
 	secs := total % 60
 	parts := []string{}
 	if days > 0 {
-		parts = append(parts, fmt.Sprintf("%d д", days))
+		parts = append(parts, fmt.Sprintf(L("%d д", "%dd"), days))
 	}
 	if hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%d ч", hours))
+		parts = append(parts, fmt.Sprintf(L("%d ч", "%dh"), hours))
 	}
 	if mins > 0 || hours > 0 || days > 0 {
-		parts = append(parts, fmt.Sprintf("%d мин", mins))
+		parts = append(parts, fmt.Sprintf(L("%d мин", "%dm"), mins))
 	}
-	parts = append(parts, fmt.Sprintf("%d с", secs))
+	parts = append(parts, fmt.Sprintf(L("%d с", "%ds"), secs))
 	return strings.Join(parts, " ")
 }

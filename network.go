@@ -15,12 +15,16 @@ type NetworkInfo struct {
 	Interfaces    []NetInterface
 	DNSServers    []string
 	SearchDomains []string
+	GatewayIP     string
+	GatewayMAC    string
+	GatewayVendor string
 }
 
 // NetInterface describes a single network interface.
 type NetInterface struct {
 	Name       string
 	MAC        string
+	MACVendor  string
 	State      string
 	MTU        int
 	SpeedMbps  int
@@ -29,6 +33,8 @@ type NetInterface struct {
 	IPv4       []string
 	IPv6       []string
 	IsWireless bool
+	RxBytes    uint64
+	TxBytes    uint64
 	Wireless   *WirelessInfo
 }
 
@@ -36,6 +42,8 @@ type NetInterface struct {
 type WirelessInfo struct {
 	SSID         string
 	Connected    bool
+	BSSID        string
+	BSSIDVendor  string
 	FrequencyMHz int
 	Channel      string
 	Band         string
@@ -63,9 +71,12 @@ func collectNetworkInfo() NetworkInfo {
 		iface := NetInterface{Name: name}
 		base := filepath.Join("/sys/class/net", name)
 		iface.MAC = readFileTrim(filepath.Join(base, "address"))
+		iface.MACVendor = lookupMACVendor(iface.MAC)
 		iface.State = readFileTrim(filepath.Join(base, "operstate"))
 		iface.MTU = int(parseUint(readFileTrim(filepath.Join(base, "mtu"))))
 		iface.Carrier = readFileTrim(filepath.Join(base, "carrier")) == "1"
+		iface.RxBytes = parseUint(readFileTrim(filepath.Join(base, "statistics/rx_bytes")))
+		iface.TxBytes = parseUint(readFileTrim(filepath.Join(base, "statistics/tx_bytes")))
 
 		iface.IPv4, iface.IPv6 = interfaceAddrs(name)
 
@@ -80,7 +91,67 @@ func collectNetworkInfo() NetworkInfo {
 	}
 
 	sort.Slice(ni.Interfaces, func(i, j int) bool { return ni.Interfaces[i].Name < ni.Interfaces[j].Name })
+	ni.GatewayIP, ni.GatewayMAC = defaultGateway()
+	if ni.GatewayMAC != "" {
+		ni.GatewayVendor = lookupMACVendor(ni.GatewayMAC)
+	}
 	return ni
+}
+
+// defaultGateway finds the IPv4 default route and resolves the gateway's MAC
+// from the ARP table, so a LAN setup shows the router and its vendor.
+func defaultGateway() (ip, mac string) {
+	f, err := os.Open("/proc/net/route")
+	if err == nil {
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			fields := strings.Fields(sc.Text())
+			// Iface Destination Gateway Flags RefCnt Use Metric Mask ...
+			if len(fields) < 3 || fields[1] != "00000000" {
+				continue
+			}
+			ip = hexLEToIPv4(fields[2])
+			if ip != "" {
+				break
+			}
+		}
+		f.Close()
+	}
+	if ip != "" {
+		mac = arpLookup(ip)
+	}
+	return
+}
+
+// hexLEToIPv4 converts the little-endian hex form used by /proc/net/route.
+func hexLEToIPv4(h string) string {
+	if len(h) != 8 {
+		return ""
+	}
+	var b [4]byte
+	for i := 0; i < 4; i++ {
+		v := parseUintHex(h[i*2 : i*2+2])
+		b[3-i] = byte(v)
+	}
+	return net.IPv4(b[0], b[1], b[2], b[3]).String()
+}
+
+// arpLookup finds the MAC for an IP in /proc/net/arp.
+func arpLookup(ip string) string {
+	b, err := readFile("/proc/net/arp")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		// IPaddress HWtype Flags HWaddress Mask Device
+		if len(fields) >= 4 && fields[0] == ip {
+			if fields[3] != "00:00:00:00:00:00" {
+				return fields[3]
+			}
+		}
+	}
+	return ""
 }
 
 // dnsServers reads resolv.conf, skipping the systemd-resolved stub when the
@@ -200,6 +271,12 @@ func collectWireless(name string) *WirelessInfo {
 			switch {
 			case strings.HasPrefix(line, "Connected to"):
 				wi.Connected = true
+				// "Connected to aa:bb:cc:dd:ee:ff (on wlan0)"
+				f := strings.Fields(strings.TrimPrefix(line, "Connected to"))
+				if len(f) > 0 && strings.Count(f[0], ":") == 5 {
+					wi.BSSID = f[0]
+					wi.BSSIDVendor = lookupMACVendor(f[0])
+				}
 			case strings.HasPrefix(line, "SSID:"):
 				wi.SSID = strings.TrimSpace(strings.TrimPrefix(line, "SSID:"))
 			case strings.HasPrefix(line, "freq:"):
@@ -280,13 +357,13 @@ func freqToBandChannel(freq int) (band, channel string) {
 		} else {
 			ch = (freq - 2407) / 5
 		}
-		return "2.4 ГГц", itoa(ch)
+		return "2.4", itoa(ch)
 	case freq >= 5160 && freq <= 5895:
-		return "5 ГГц", itoa((freq - 5000) / 5)
+		return "5", itoa((freq - 5000) / 5)
 	case freq >= 5955 && freq <= 7115:
-		return "6 ГГц", itoa((freq - 5950) / 5)
+		return "6", itoa((freq - 5950) / 5)
 	case freq >= 5150 && freq <= 5250:
-		return "5 ГГц", itoa((freq - 5000) / 5)
+		return "5", itoa((freq - 5000) / 5)
 	}
 	return "", ""
 }
