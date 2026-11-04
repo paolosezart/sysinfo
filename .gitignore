@@ -1,0 +1,4 @@
+/dist/
+/sysinfo
+/sysinfo-*
+*.test
