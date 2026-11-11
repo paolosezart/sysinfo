@@ -41,9 +41,27 @@ func collectSystemInfo() SystemInfo {
 		}
 	}
 	si.BootTime = time.Now().Add(-si.Uptime)
-	si.TimeZone = time.Now().Format("MST")
+	si.TimeZone = timeZoneName()
 
 	return si
+}
+
+// timeZoneName resolves the IANA zone name (e.g. "Europe/Moscow"). time.Now()'s
+// "MST" format only yields a numeric offset on many systems, which is far less
+// useful, so prefer the zoneinfo link and the /etc/timezone file.
+func timeZoneName() string {
+	if link, err := os.Readlink("/etc/localtime"); err == nil {
+		if idx := strings.Index(link, "zoneinfo/"); idx >= 0 {
+			return link[idx+len("zoneinfo/"):]
+		}
+	}
+	if tz := readFileTrim("/etc/timezone"); tz != "" {
+		return tz
+	}
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+	return time.Now().Format("MST")
 }
 
 func osReleasePrettyName() string {

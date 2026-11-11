@@ -34,7 +34,7 @@ func main() {
 		langCode = detectLanguage()
 	}
 
-	if *flagHelp {
+	if *flagHelp || *flagH {
 		printHelp()
 		return
 	}
@@ -48,14 +48,14 @@ func main() {
 	}
 
 	// One-shot maintenance commands that only touch the local databases.
-	if *flagVendor {
+	if *flagVendor || *flagV {
 		if err := updateVendorDB(); err != nil {
 			fmt.Fprintln(os.Stderr, "vendor:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if *flagOUI {
+	if *flagOUI || *flagO {
 		if err := updateOUIDB(); err != nil {
 			fmt.Fprintln(os.Stderr, "oui:", err)
 			os.Exit(1)

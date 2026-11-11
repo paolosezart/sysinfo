@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -158,14 +159,49 @@ func TestSDTimingName(t *testing.T) {
 }
 
 func TestSDBase(t *testing.T) {
-	// A CSD with speed class 10 in the last byte (0x3B).
+	// SD Status register: the speed class is bits 440..447, i.e. the top byte of
+	// raw_ssr[2] (hex characters 16..18). 4 = class 10.
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(dir, "device"), "csd", "0000000000000000000000000000003b")
+	ssr := strings.Repeat("0", 128)
+	ssr = ssr[:16] + "04" + ssr[18:]
+	writeFixture(t, filepath.Join(dir, "device"), "ssr", ssr)
 	if got := sdSpeedClass(dir); got == "" {
-		t.Error("expected a speed class from CSD ending in 3b")
+		t.Error("expected a speed class from an ssr with class 10")
+	}
+}
+
+func TestKeyboardLayouts(t *testing.T) {
+	// RPiOS stores "us,ru" with the variant list ",phonetic": the first layout has
+	// no variant, so the rendered string must not contain an empty "(...)".
+	got := keyboardLayouts(LocaleInfo{Layouts: "us,ru", Variant: ",phonetic"})
+	if got != "us, ru (phonetic)" {
+		t.Errorf("keyboardLayouts = %q, want %q", got, "us, ru (phonetic)")
+	}
+	if got := keyboardLayouts(LocaleInfo{Layouts: "us"}); got != "us" {
+		t.Errorf("keyboardLayouts = %q, want us", got)
+	}
+}
+
+func TestARMImplementerName(t *testing.T) {
+	if got := armImplementerName("0x41"); got != "ARM" {
+		t.Errorf("0x41 = %q, want ARM", got)
+	}
+	// Unknown codes must be preserved rather than dropped.
+	if got := armImplementerName("0xff"); got != "0xff" {
+		t.Errorf("0xff = %q, want the raw code back", got)
+	}
+}
+
+func TestMMCBusSpeed(t *testing.T) {
+	// The debugfs "timing spec" line is the only source of the active bus mode.
+	if got := normalizeTiming("sd uhs SDR104"); got != "sdr104" {
+		t.Errorf("normalizeTiming = %q, want sdr104", got)
+	}
+	if got := sdTimingName("sdr104"); got == "" {
+		t.Error("sdr104 should map to a name")
 	}
 }
 

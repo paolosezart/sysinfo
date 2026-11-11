@@ -139,7 +139,7 @@ func buildEDID() []byte {
 	b[16] = 10 // week
 	b[17] = 30 // year = 2020
 	b[18], b[19] = 1, 4
-	b[21], b[22] = 52, 29 // 52x29 cm
+	b[21], b[22] = 34, 19 // 34x19 cm (a 15.8" panel)
 
 	// Detailed timing descriptor #1: 1920x1080@60, pixel clock 148500 kHz.
 	// pixel clock (LSB then MSB, in 10 kHz units): 14850 = 0x3A02
@@ -187,8 +187,8 @@ func TestParseEDID(t *testing.T) {
 	if m.RefreshHz < 59 || m.RefreshHz > 61 {
 		t.Errorf("refresh = %v, want ~60", m.RefreshHz)
 	}
-	if m.SizeCmW < 5 || m.SizeCmW > 6 || m.SizeCmH < 2 || m.SizeCmH > 3 {
-		t.Errorf("size = %vx%v, want 5x3", m.SizeCmW, m.SizeCmH)
+	if m.SizeCmW < 33 || m.SizeCmW > 35 || m.SizeCmH < 18 || m.SizeCmH > 20 {
+		t.Errorf("size = %vx%v, want 34x19", m.SizeCmW, m.SizeCmH)
 	}
 }
 

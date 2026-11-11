@@ -256,6 +256,12 @@ func ethernetLink(name string) (speed int, duplex string) {
 			}
 		}
 	}
+	// ethtool reports "Unknown! (255)" for a down link; only full/half are real.
+	switch strings.ToLower(duplex) {
+	case "full", "half":
+	default:
+		duplex = ""
+	}
 	return
 }
 

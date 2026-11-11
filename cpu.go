@@ -80,6 +80,8 @@ func parseCPUInfo(path string) (model, vendor string, cores, threads int, bogo s
 	seenSockets := map[string]bool{}
 	sockets := 0
 	perSocketCores := 0
+	part := ""
+	boardLevel := false
 	for _, line := range lines {
 		idx := strings.Index(line, ":")
 		if idx < 0 {
@@ -95,19 +97,24 @@ func parseCPUInfo(path string) (model, vendor string, cores, threads int, bogo s
 				model = val
 			}
 		case "Model":
-			// Raspberry Pi 4/5 style "Model : Raspberry Pi 4 Model B Rev 1.4"
+			// Raspberry Pi 4/5 style "Model : Raspberry Pi 4 Model B Rev 1.4".
+			// This is the board name, not the core, so it is only a fallback.
 			if model == "" {
-				model = val
+				model, boardLevel = val, true
 			}
 		case "Hardware":
 			if model == "" {
-				model = val
+				model, boardLevel = val, true
+			}
+		case "CPU part":
+			if part == "" {
+				part = val
 			}
 		case "vendor_id":
 			vendor = val
 		case "CPU implementer":
 			if vendor == "" {
-				vendor = val
+				vendor = armImplementerName(val)
 			}
 		case "BogoMIPS":
 			if bogo == "" {
@@ -140,7 +147,129 @@ func parseCPUInfo(path string) (model, vendor string, cores, threads int, bogo s
 	if threads == 0 {
 		threads = cores
 	}
+	// On ARM the "Model" line is the board name, which the SYSTEM block already
+	// shows. Prefer the actual core when /proc/cpuinfo exposes "CPU part".
+	if boardLevel {
+		if core := armCoreName(part); core != "" {
+			model = core
+		}
+	}
 	return
+}
+
+// armCoreName maps an ARM "CPU part" number to the marketing core name. The
+// values are ARM_CPU_PART_* from the kernel's asm/cputype.h.
+func armCoreName(part string) string {
+	switch strings.ToLower(strings.TrimSpace(part)) {
+	case "0xb76":
+		return "ARM1176"
+	case "0xc05":
+		return "Cortex-A5"
+	case "0xc07":
+		return "Cortex-A7"
+	case "0xc08":
+		return "Cortex-A8"
+	case "0xc09":
+		return "Cortex-A9"
+	case "0xc0d":
+		return "Cortex-A12"
+	case "0xc0f":
+		return "Cortex-A15"
+	case "0xc0e":
+		return "Cortex-A17"
+	case "0xd01":
+		return "Cortex-A32"
+	case "0xd02":
+		return "Cortex-A34"
+	case "0xd03":
+		return "Cortex-A53"
+	case "0xd04":
+		return "Cortex-A35"
+	case "0xd05":
+		return "Cortex-A55"
+	case "0xd06":
+		return "Cortex-A65"
+	case "0xd07":
+		return "Cortex-A57"
+	case "0xd08":
+		return "Cortex-A72"
+	case "0xd09":
+		return "Cortex-A73"
+	case "0xd0a":
+		return "Cortex-A75"
+	case "0xd0b":
+		return "Cortex-A76"
+	case "0xd0c":
+		return "Neoverse-N1"
+	case "0xd0d":
+		return "Cortex-A77"
+	case "0xd41":
+		return "Cortex-A78"
+	case "0xd44":
+		return "Cortex-X1"
+	case "0xd46":
+		return "Cortex-A510"
+	case "0xd47":
+		return "Cortex-A710"
+	case "0xd48":
+		return "Cortex-X2"
+	case "0xd49":
+		return "Neoverse-N2"
+	case "0xd4d":
+		return "Cortex-A715"
+	case "0xd4e":
+		return "Cortex-X3"
+	case "0xd80":
+		return "Cortex-A520"
+	case "0xd81":
+		return "Cortex-A720"
+	case "0xd82":
+		return "Cortex-X4"
+	}
+	return ""
+}
+
+// armImplementerName maps the "CPU implementer" byte from /proc/cpuinfo to the
+// vendor that designed the core. Pi boards report 0x41 (ARM) etc.
+func armImplementerName(code string) string {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "0x41":
+		return "ARM"
+	case "0x42":
+		return "Broadcom"
+	case "0x43":
+		return "Cavium"
+	case "0x44":
+		return "DEC"
+	case "0x46":
+		return "Fujitsu"
+	case "0x48":
+		return "HiSilicon"
+	case "0x49":
+		return "Infineon"
+	case "0x4d":
+		return "Motorola/Freescale"
+	case "0x4e":
+		return "NVIDIA"
+	case "0x50":
+		return "Ampere"
+	case "0x51":
+		return "Qualcomm"
+	case "0x53":
+		return "Samsung"
+	case "0x56":
+		return "Marvell"
+	case "0x61":
+		return "Apple"
+	case "0x69":
+		return "Intel"
+	case "0x70":
+		return "Phytium"
+	case "0xc0":
+		return "Ampere"
+	}
+	// Unknown implementer: keep the raw code so nothing is silently dropped.
+	return code
 }
 
 // cpuInfoField returns the first value for key in a "key : value" file.

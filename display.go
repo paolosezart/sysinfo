@@ -110,10 +110,10 @@ func parseEDID(b []byte) *Monitor {
 		}
 	}
 
-	// Physical size in cm (bytes 21, 22).
+	// Physical size in cm (bytes 21, 22); the EDID already stores centimetres.
 	if b[21] != 0 && b[22] != 0 {
-		m.SizeCmW = float64(b[21]) / 10
-		m.SizeCmH = float64(b[22]) / 10
+		m.SizeCmW = float64(b[21])
+		m.SizeCmH = float64(b[22])
 	}
 	return m
 }

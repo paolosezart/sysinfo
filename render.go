@@ -109,11 +109,7 @@ func (r *renderer) renderSystem(s SystemInfo, loc LocaleInfo) {
 		r.kv(L("Язык системы", "System language"), fmt.Sprintf("%s (%s)", loc.LangName, loc.LangCode))
 	}
 	if loc.Layouts != "" {
-		layouts := loc.Layouts
-		if loc.Variant != "" {
-			layouts += L(" (вариант: ", " (variant: ") + loc.Variant + ")"
-		}
-		r.kv(L("Раскладки клавиатуры", "Keyboard layouts"), layouts)
+		r.kv(L("Раскладки клавиатуры", "Keyboard layouts"), keyboardLayouts(loc))
 	}
 	r.kv(L("Время загрузки", "Boot time"), s.BootTime.Format("02.01.2006 15:04:05"))
 	r.kv(L("Время работы", "Uptime"), humanDuration(s.Uptime))
@@ -387,8 +383,11 @@ func (r *renderer) renderDisplay(d DisplayInfo) {
 	}
 	for _, c := range d.Connectors {
 		status := r.paint(cDim, L("не подключён", "disconnected"))
-		if c.Status == "connected" {
+		switch c.Status {
+		case "connected":
 			status = r.paint(cGreen, L("подключён", "connected"))
+		case "unknown":
+			status = r.paint(cDim, L("неизвестно", "unknown"))
 		}
 		r.kv(c.Name, status)
 	}
@@ -535,6 +534,32 @@ func duplexHuman(d string) string {
 		return L("полу", "half")
 	}
 	return d
+}
+
+// keyboardLayouts renders the layout list with its variants, pairing each layout
+// with the variant at the same index and dropping empty entries. RPiOS stores
+// "us,ru" with a variant string like ",phonetic" where the first entry is blank.
+func keyboardLayouts(loc LocaleInfo) string {
+	layouts := strings.Split(loc.Layouts, ",")
+	variants := strings.Split(loc.Variant, ",")
+	var parts []string
+	for i, name := range layouts {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		part := name
+		if i < len(variants) {
+			if v := strings.TrimSpace(variants[i]); v != "" {
+				part += " (" + v + ")"
+			}
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return loc.Layouts
+	}
+	return strings.Join(parts, ", ")
 }
 
 func summarizeFeatures(features []string) string {

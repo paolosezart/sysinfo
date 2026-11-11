@@ -2,17 +2,11 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
-
-// hexToBytes decodes a hex string (possibly space separated) into bytes.
-func hexToBytes(s string) ([]byte, error) {
-	return hex.DecodeString(strings.ReplaceAll(strings.TrimSpace(s), " ", ""))
-}
 
 // deviceForPath returns the block device backing a path, by finding the longest
 // mount point in /proc/mounts that is a prefix of the path.
@@ -64,12 +58,13 @@ func blockDeviceMeta(device string) (model, busSpeed, sdClass string) {
 		model = readFileTrim(filepath.Join(dir, "device/product_name"))
 	}
 
-	// SD/MMC bus speed mode (mmcblk*): hs, ddr50, sdr104 ...
-	if mode := readFileTrim(filepath.Join(dir, "device/timing_spec")); mode != "" {
-		busSpeed = sdTimingName(mode)
+	// SD/MMC bus speed mode (mmcblk*). The block device exposes no timing
+	// attribute in sysfs; the active mode lives in debugfs.
+	if base != "" && strings.HasPrefix(base, "mmcblk") {
+		busSpeed = mmcBusSpeed(dir)
 	}
 
-	// SD speed class from the CSD, when the kernel exposes it.
+	// SD speed class from the SD Status register, when the kernel exposes it.
 	sdClass = sdSpeedClass(dir)
 	return
 }
@@ -107,6 +102,12 @@ func sdTimingName(spec string) string {
 		return "HS400 (400 " + L("МБ/с", "MB/s") + ")"
 	case "ddr50":
 		return "DDR50 (50 " + L("МБ/с", "MB/s") + ")"
+	case "ddr52":
+		return "DDR52 (52 " + L("МБ/с", "MB/s") + ")"
+	case "sdr12":
+		return "SDR12 (12.5 " + L("МБ/с", "MB/s") + ")"
+	case "sdr25":
+		return "SDR25 (25 " + L("МБ/с", "MB/s") + ")"
 	case "sdr50":
 		return "SDR50 (50 " + L("МБ/с", "MB/s") + ")"
 	case "sdr104":
@@ -115,26 +116,80 @@ func sdTimingName(spec string) string {
 	return spec
 }
 
-// sdSpeedClass maps the CSD speed-class bits to a human label. Many kernels do
-// not expose the CSD, in which case this returns "".
+// mmcBusSpeed reads the active bus timing from debugfs, where the kernel exposes
+// it as "timing spec: <n> (<name>)". The block device has no such attribute in
+// sysfs, so this is the only place the current mode is reported.
+func mmcBusSpeed(dir string) string {
+	idx := strings.TrimPrefix(filepath.Base(dir), "mmcblk")
+	if idx == "" {
+		return ""
+	}
+	ios := readFileTrim(filepath.Join("/sys/kernel/debug/mmc"+idx, "ios"))
+	if ios == "" {
+		return ""
+	}
+	for _, line := range strings.Split(ios, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "timing spec:") {
+			continue
+		}
+		// Format: "timing spec:\t2 (sd high-speed)".
+		start := strings.Index(line, "(")
+		end := strings.LastIndex(line, ")")
+		if start < 0 || end <= start {
+			break
+		}
+		return sdTimingName(normalizeTiming(line[start+1 : end]))
+	}
+	return ""
+}
+
+// normalizeTiming maps a debugfs timing label to the short form sdTimingName uses.
+func normalizeTiming(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "legacy":
+		return "legacy"
+	case "sd high-speed", "mmc high-speed":
+		return "hs"
+	case "sd uhs sdr12":
+		return "sdr12"
+	case "sd uhs sdr25":
+		return "sdr25"
+	case "sd uhs sdr50":
+		return "sdr50"
+	case "sd uhs sdr104":
+		return "sdr104"
+	case "sd uhs ddr50":
+		return "ddr50"
+	case "mmc ddr52":
+		return "ddr52"
+	case "mmc hs200":
+		return "hs200"
+	case "mmc hs400", "mmc hs400 enhanced strobe":
+		return "hs400"
+	}
+	return s
+}
+
+// sdSpeedClass reads the SD Status register (ssr) from sysfs and maps the
+// speed-class field to a human label. The CSD does not carry the speed class,
+// so when the kernel does not expose ssr this returns "".
 func sdSpeedClass(dir string) string {
-	csd := readFileTrim(filepath.Join(dir, "device/csd"))
-	if csd == "" {
+	ssr := strings.ReplaceAll(readFileTrim(filepath.Join(dir, "device/ssr")), " ", "")
+	// The kernel prints the 512-bit register as 16 big-endian u32 values with no
+	// separators. The speed-class byte is bits 440..447, the top byte of raw_ssr[2]
+	// (hex characters 16..18). Mapping: 0=class 0, 1=class 2 ... 4=class 10.
+	if len(ssr) < 18 {
 		return ""
 	}
-	// The CSD is 16 hex bytes; speed class lives in the last byte (CCC/class).
-	b, err := hexToBytes(csd)
-	if err != nil || len(b) < 16 {
-		return ""
-	}
-	switch b[15] {
-	case 0x00, 0x2B:
-		return L("Class 0/2", "Class 0/2")
-	case 0x2D:
+	switch parseUintHex(ssr[16:18]) {
+	case 1:
+		return L("Class 2 (2 МБ/с)", "Class 2 (2 MB/s)")
+	case 2:
 		return L("Class 4 (4 МБ/с)", "Class 4 (4 MB/s)")
-	case 0x32:
+	case 3:
 		return L("Class 6 (6 МБ/с)", "Class 6 (6 MB/s)")
-	case 0x3B:
+	case 4:
 		return L("Class 10 (10 МБ/с)", "Class 10 (10 MB/s)")
 	}
 	return ""

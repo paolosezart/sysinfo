@@ -33,6 +33,20 @@ go vet ./...
   ```
   Then bump `sysinfo/1.2` in the `User-Agent` if the format changed.
 
+## Data sources (learned the hard way)
+- SD speed class is NOT in the CSD. It lives in the SD Status register (`ssr`),
+  bits 440..447 -> the top byte of `raw_ssr[2]`, i.e. hex chars 16..18 of
+  `/sys/block/mmcblk*/device/ssr`. Value 0/1/2/3/4 = class 0/2/4/6/10.
+- The active MMC bus mode is not in sysfs. Read the debugfs `ios` file
+  (`/sys/kernel/debug/mmc<N>/ios`, "timing spec: <n> (<name>)").
+- EDID bytes 21/22 are already centimetres — do not divide by 10.
+- `ethtool` reports duplex "Unknown! (255)" for a down link; only full/half
+  are meaningful.
+- ARM `CPU implementer`/`CPU part` are raw hex codes; map them to vendor/core
+  names (`armImplementerName`, `armCoreName`) instead of showing `0x41`.
+- `/proc/cpuinfo` "Model" on ARM is the *board* name (already in SYSTEM), so
+  prefer `CPU part` for the CPU block.
+
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`
   in `i18n.go`. Units are stored language-neutral ("MHz", "Mbps") and localized

@@ -19,7 +19,7 @@ func demoReport() Report {
 			Serial:        "100000006e648f0b",
 			BootTime:      time.Now().Add(-12*time.Hour - 22*time.Minute),
 			Uptime:        12*time.Hour + 22*time.Minute + 17*time.Second,
-			TimeZone:      "+05",
+			TimeZone:      "Europe/Moscow",
 		},
 		Locale: LocaleInfo{
 			LangName: languageName("ru"),
@@ -28,8 +28,8 @@ func demoReport() Report {
 			Variant:  ",phonetic",
 		},
 		CPU: CPUInfo{
-			Model:        "Raspberry Pi 4 Model B Rev 1.2",
-			Vendor:       "0x41",
+			Model:        "Cortex-A72",
+			Vendor:       "ARM",
 			Architecture: "arm64",
 			Cores:        4,
 			Threads:      4,
@@ -83,7 +83,7 @@ func demoReport() Report {
 			Interfaces: []NetInterface{
 				{
 					Name: "eth0", MAC: "dc:a6:32:5a:d5:62", MACVendor: "Raspberry Pi Trading Ltd",
-					State: "down", MTU: 1500, Duplex: "Unknown! (255)",
+					State: "down", MTU: 1500,
 				},
 				{
 					Name: "wlan0", MAC: "dc:a6:32:5a:d5:63", MACVendor: "Raspberry Pi Trading Ltd",
@@ -130,7 +130,7 @@ func demoReport() Report {
 			Monitors: []Monitor{{
 				Connector: "HDMI-A-1", Manufacturer: "SGT", ProductName: "P158FT",
 				Year: 2023, EDIDVersion: "1.3",
-				PreferredWidth: 1920, PreferredHeight: 1080, RefreshHz: 60, SizeCmW: 3, SizeCmH: 2,
+				PreferredWidth: 1920, PreferredHeight: 1080, RefreshHz: 60, SizeCmW: 34, SizeCmH: 19,
 			}},
 		},
 		USB: []USBDevice{
