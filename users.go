@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,20 +52,39 @@ const (
 )
 
 // utmpLayout describes the trailing (architecture-dependent) part of a record.
+// Offsets are identical to the struct above except for ut_session/ut_tv:
+//   - compact: ut_session is int32_t and ut_tv is {uint32 tv_sec; int32 tv_usec}
+//   - wide:    ut_session is a 64-bit long and ut_tv is a struct timeval
 type utmpLayout struct {
 	size       int
 	sessionOff int
 	tvSecOff   int
-	wide       bool // ut_session is a 64-bit long and ut_tv is a struct timeval
+	wide       bool
 }
+
+// Both layouts were verified against the glibc struct definition (bits/utmp.h)
+// with a C offsetof() probe: compact is the x86_64 native layout, wide mirrors
+// the aarch64/s390x/loong64 one (long and struct timeval share size/alignment
+// on x86_64 and aarch64, so compiling the wide struct on x86_64 reproduces it).
+var (
+	utmpCompact = utmpLayout{size: 384, sessionOff: 336, tvSecOff: 340}
+	utmpWide    = utmpLayout{size: 400, sessionOff: 336, tvSecOff: 344, wide: true}
+)
 
 func utmpLayoutFor(goarch string) utmpLayout {
 	switch goarch {
 	case "arm64", "s390x", "loong64":
-		return utmpLayout{size: 400, sessionOff: 344, tvSecOff: 352, wide: true}
+		return utmpWide
 	default:
-		return utmpLayout{size: 384, sessionOff: 336, tvSecOff: 340}
+		return utmpCompact
 	}
+}
+
+func (l utmpLayout) alternate() utmpLayout {
+	if l.wide {
+		return utmpCompact
+	}
+	return utmpWide
 }
 
 var utmpRec = utmpLayoutFor(runtime.GOARCH)
@@ -223,8 +244,13 @@ func procEnviron(pid int32) []byte {
 	return b
 }
 
-// utmpFile returns the login record file, honouring the common paths.
+// utmpFile returns the login record file, honouring the common paths. An
+// explicit SYSINFO_UTMP overrides the default, which makes the parser testable
+// against a saved copy on any machine.
 func utmpFile() string {
+	if p := os.Getenv("SYSINFO_UTMP"); p != "" {
+		return p
+	}
 	for _, p := range []string{"/run/utmp", "/var/run/utmp"} {
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -233,10 +259,40 @@ func utmpFile() string {
 	return "/run/utmp"
 }
 
-// readUtmp parses the fixed-width utmp records. Records of every type are
-// returned; callers filter. A trailing partial record is ignored.
+// readUtmp parses the login records (utmp). The record size depends on the
+// architecture, so both layouts are tried and scored; the better one wins. This
+// keeps a misidentified GOARCH (or a binary run under an unusual libc) from
+// silently reporting "no sessions".
 func readUtmp(path string) ([]utmpRecord, error) {
-	return readUtmpWith(path, utmpRec)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	records, _ := parseUtmp(b, utmpRec)
+	pScore := layoutScore(b, utmpRec)
+
+	if alt := utmpRec.alternate(); alt.size != utmpRec.size {
+		if aRecords, aValid := parseUtmp(b, alt); layoutScoreN(b, alt, aValid) > pScore {
+			records = aRecords
+		}
+	}
+	return records, nil
+}
+
+// layoutScore ranks a layout for a given utmp image. A correct layout divides
+// the file into whole records, so that dominates; the number of usable login
+// records breaks the remaining ties.
+func layoutScore(b []byte, lay utmpLayout) int {
+	_, valid := parseUtmp(b, lay)
+	return layoutScoreN(b, lay, valid)
+}
+
+func layoutScoreN(b []byte, lay utmpLayout, valid int) int {
+	score := valid * 2
+	if len(b)%lay.size == 0 {
+		score += 1000
+	}
+	return score
 }
 
 // readUtmpWith parses utmp records using an explicit layout, so the parser can
@@ -246,7 +302,15 @@ func readUtmpWith(path string, lay utmpLayout) ([]utmpRecord, error) {
 	if err != nil {
 		return nil, err
 	}
+	records, _ := parseUtmp(b, lay)
+	return records, nil
+}
+
+// parseUtmp walks the buffer with the given stride and returns the records plus
+// the number of usable login records, used to pick the right layout.
+func parseUtmp(b []byte, lay utmpLayout) ([]utmpRecord, int) {
 	var out []utmpRecord
+	valid := 0
 	for off := 0; off+lay.size <= len(b); off += lay.size {
 		rec := b[off : off+lay.size]
 		t := int16(binary.LittleEndian.Uint16(rec[0:]))
@@ -268,9 +332,27 @@ func readUtmpWith(path string, lay utmpLayout) ([]utmpRecord, error) {
 		} else {
 			r.session = int64(binary.LittleEndian.Uint32(rec[lay.sessionOff:]))
 		}
+		if usableLogin(r) {
+			valid++
+		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out, valid
+}
+
+// usableLogin reports whether a record looks like a real USER_PROCESS entry
+// rather than the debris of a wrong stride.
+func usableLogin(r utmpRecord) bool {
+	return r.typ == utUserProcess && r.user != "" && printable(r.user) && printable(r.line)
+}
+
+func printable(s string) bool {
+	for _, c := range s {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // utmpSec reads the login timestamp. The wide layout stores tv_sec as a signed
@@ -280,6 +362,35 @@ func utmpSec(rec []byte, lay utmpLayout) int64 {
 		return int64(binary.LittleEndian.Uint64(rec[lay.tvSecOff:]))
 	}
 	return int64(int32(binary.LittleEndian.Uint32(rec[lay.tvSecOff:])))
+}
+
+// debugUtmp prints why the session list is (or is not) populated: the file it
+// read, its size, and how many records each layout yields. Written for the
+// "no active sessions" report so the cause is visible on the target machine.
+func debugUtmp(w io.Writer) {
+	path := utmpFile()
+	fmt.Fprintf(w, "utmp file: %s\n", path)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(w, "  read error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "  size: %d bytes\n", len(b))
+	for _, lay := range []utmpLayout{utmpCompact, utmpWide} {
+		records, valid := parseUtmp(b, lay)
+		name := "compact"
+		if lay.wide {
+			name = "wide"
+		}
+		fmt.Fprintf(w, "  layout %-7s size=%d ut_session@%d ut_tv@%d: %d records, %d login records, %d trailing bytes\n",
+			name, lay.size, lay.sessionOff, lay.tvSecOff, len(records), valid, len(b)%lay.size)
+	}
+	fmt.Fprintf(w, "  arch: %s -> chosen layout size %d\n", runtime.GOARCH, utmpRec.size)
+	sessions := sessionsFromPath(path)
+	fmt.Fprintf(w, "  parsed sessions: %d\n", len(sessions))
+	for _, s := range sessions {
+		fmt.Fprintf(w, "    %s [%s] line=%q remote=%q\n", s.User, s.ConnType, s.Line, s.Remote)
+	}
 }
 
 // reverseDNS resolves an address to a host name, bounded by cmdTimeout so a

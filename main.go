@@ -39,6 +39,11 @@ func main() {
 		return
 	}
 
+	if *flagDbgUtmp {
+		debugUtmp(os.Stdout)
+		return
+	}
+
 	if opts.install {
 		if err := installSelf(); err != nil {
 			fmt.Fprintln(os.Stderr, "install:", err)
@@ -126,6 +131,7 @@ var (
 	flagU       = flag.Bool("u", false, L("то же, что --usb", "same as --usb"))
 	flagUsers   = flag.Bool("users", false, L("только блок ПОЛЬЗОВАТЕЛИ", "only the USERS block"))
 	flagSess    = flag.Bool("sessions", false, L("то же, что --users", "same as --users"))
+	flagDbgUtmp = flag.Bool("debug-utmp", false, L("диагностика чтения utmp", "diagnose utmp reading"))
 )
 
 func parseFlags() options {
@@ -262,6 +268,7 @@ func printHelp() {
   --no-color          ` + L("без цвета", "disable color") + `
   --ru / --en         ` + L("принудительный язык вывода", "force the output language") + `
   --demo              ` + L("пример вывода для Raspberry Pi 4B", "sample Raspberry Pi 4B report") + `
+  --debug-utmp        ` + L("диагностика чтения сессий (utmp)", "diagnose session reading (utmp)") + `
   --install, -i       ` + L("установить в /usr/local/bin/sysinfo (нужен root)", "install as /usr/local/bin/sysinfo (needs root)") + `
   --vendor, -v        ` + L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)") + `
   --oui, -o           ` + L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database") + `

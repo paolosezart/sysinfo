@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -28,30 +29,89 @@ func buildUtmpRecord(lay utmpLayout, typ int16, pid int32, line, user, host stri
 }
 
 // The two layouts glibc produces: compact (amd64, armv7, riscv64, …) and wide
-// (aarch64, s390x, loong64).
+// (aarch64, s390x, loong64). Offsets mirror bits/utmp.h.
 var (
 	compactLayout = utmpLayout{size: 384, sessionOff: 336, tvSecOff: 340}
-	wideLayout    = utmpLayout{size: 400, sessionOff: 344, tvSecOff: 352, wide: true}
+	wideLayout    = utmpLayout{size: 400, sessionOff: 336, tvSecOff: 344, wide: true}
 )
 
 func TestUtmpLayoutFor(t *testing.T) {
 	cases := []struct {
 		arch string
-		want int
+		want utmpLayout
 	}{
-		{"amd64", 384},
-		{"arm", 384},
-		{"386", 384},
-		{"riscv64", 384},
-		{"ppc64le", 384},
-		{"arm64", 400},
-		{"s390x", 400},
-		{"loong64", 400},
+		{"amd64", compactLayout},
+		{"arm", compactLayout},
+		{"386", compactLayout},
+		{"riscv64", compactLayout},
+		{"ppc64le", compactLayout},
+		{"arm64", wideLayout},
+		{"s390x", wideLayout},
+		{"loong64", wideLayout},
 	}
 	for _, c := range cases {
-		if got := utmpLayoutFor(c.arch).size; got != c.want {
-			t.Errorf("utmpLayoutFor(%q).size = %d, want %d", c.arch, got, c.want)
+		if got := utmpLayoutFor(c.arch); got != c.want {
+			t.Errorf("utmpLayoutFor(%q) = %+v, want %+v", c.arch, got, c.want)
 		}
+	}
+}
+
+// The exact byte offsets matter: ut_session/ut_tv sit at 336/340 in the compact
+// layout but ut_tv moves to 344 in the wide one. Pin them so a future edit
+// cannot quietly reintroduce the "no sessions" bug.
+func TestUtmpOffsets(t *testing.T) {
+	if utmpCompact.sessionOff != 336 || utmpCompact.tvSecOff != 340 || utmpCompact.size != 384 {
+		t.Errorf("compact layout = %+v", utmpCompact)
+	}
+	if utmpWide.sessionOff != 336 || utmpWide.tvSecOff != 344 || utmpWide.size != 400 {
+		t.Errorf("wide layout = %+v", utmpWide)
+	}
+	if utmpRec != utmpLayoutFor(runtime.GOARCH) {
+		t.Errorf("utmpRec = %+v, want %+v", utmpRec, utmpLayoutFor(runtime.GOARCH))
+	}
+}
+
+// A wide (aarch64) file must be read even when the running binary picked the
+// compact layout, and vice versa: the parser falls back to the other stride
+// when the primary one yields no usable login records.
+func TestReadUtmpAutoDetectsLayout(t *testing.T) {
+	for _, lay := range []utmpLayout{compactLayout, wideLayout} {
+		buf := buildUtmpRecord(lay, utUserProcess, 1842, "pts/0", "raspi", "192.168.100.42", 3, 1700000200)
+		path := filepath.Join(t.TempDir(), "utmp")
+		if err := os.WriteFile(path, buf, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sessions := sessionsFromPath(path)
+		if len(sessions) != 1 || sessions[0].User != "raspi" {
+			t.Errorf("layout %d: sessionsFromPath = %+v, want 1 raspi session", lay.size, sessions)
+		}
+	}
+}
+
+// The fields up to ut_host are identical in both layouts, so a wrong stride can
+// still yield a plausible-looking first record; the trailing-bytes check is what
+// distinguishes them. A wide (aarch64) image must therefore score higher under
+// the wide layout and be parsed with the right session id and timestamp.
+func TestLayoutScorePicksDivisibleLayout(t *testing.T) {
+	buf := buildUtmpRecord(wideLayout, utUserProcess, 1842, "pts/0", "raspi", "192.168.100.42", 3, 1700000200)
+	if layoutScore(buf, wideLayout) <= layoutScore(buf, compactLayout) {
+		t.Fatalf("wide score %d <= compact score %d", layoutScore(buf, wideLayout), layoutScore(buf, compactLayout))
+	}
+
+	path := filepath.Join(t.TempDir(), "utmp")
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessions := sessionsFromPath(path)
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].SessionID != "3" {
+		t.Errorf("SessionID = %q, want 3 (wrong stride would misread it)", sessions[0].SessionID)
+	}
+	want := time.Unix(1700000200, 0).Format("02.01.2006 15:04:05")
+	if sessions[0].LoginTime != want {
+		t.Errorf("LoginTime = %q, want %q", sessions[0].LoginTime, want)
 	}
 }
 

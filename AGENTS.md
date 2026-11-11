@@ -52,15 +52,20 @@ go vet ./...
 - `operstate` can be "unknown" or missing (common for veth); fall back to
   carrier/address presence before calling a link "down".
 - Logged-in sessions come from `utmp` (`/run/utmp`). The record layout is
-  architecture dependent: fields up to `ut_host` are fixed (`ut_type`@0,
-  `ut_pid`@4, `ut_line`@8, `ut_user`@44, `ut_host`@76), but `ut_session` and
-  `ut_tv` are 32-bit only where glibc sets `__WORDSIZE_TIME64_COMPAT32=1`.
+  architecture dependent: fields up to `ut_exit` are fixed (`ut_type`@0,
+  `ut_pid`@4, `ut_line`@8, `ut_user`@44, `ut_host`@76), but `ut_session`/`ut_tv`
+  are 32-bit only where glibc sets `__WORDSIZE_TIME64_COMPAT32=1`.
   amd64/armv7/386/riscv64/ppc64/sparc64/mips keep the 384-byte record
   (`ut_session`@336, `ut_tv.tv_sec`@340); arm64/s390x/loong64 use the wide
-  400-byte record (`ut_session`@344, `ut_tv.tv_sec`@352) because there
-  `ut_session` is a 64-bit long and `ut_tv` a 16-byte `struct timeval`. Parsing
+  400-byte record where `ut_session` is a 64-bit long and `ut_tv` a 16-byte
+  `struct timeval` — there `ut_session` stays at 336 but `ut_tv.tv_sec` moves to
+  344. (Both verified with a C `offsetof()` probe; do not guess these.) Parsing
   aarch64 with the 384-byte stride silently yields nothing, so the size must be
-  chosen per `GOARCH` (`utmpLayoutFor`). Filter `ut_type == USER_PROCESS` (7).
+  chosen per `GOARCH` (`utmpLayoutFor`) with a fallback to the other layout
+  (`readUtmp` scores both, preferring the one that divides the file evenly).
+  Filter `ut_type == USER_PROCESS` (7). `--debug-utmp` prints the file, size and
+  per-layout record counts on the target machine; `SYSINFO_UTMP=<path>` overrides
+  the file for testing against a saved copy.
 - `sftp`/`scp` never appear in `utmp`: they are SSH subsystems that run without
   a pty, so sshd records no login entry for them (OpenSSH `mm_pty_allocate` ->
   `mm_record_login` runs only for interactive PTY sessions). Only the
