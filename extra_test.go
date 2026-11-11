@@ -205,6 +205,57 @@ func TestMMCBusSpeed(t *testing.T) {
 	}
 }
 
+func TestNormalizeOperState(t *testing.T) {
+	cases := []struct {
+		state           string
+		carrier, hasAdr bool
+		want            string
+	}{
+		{"up", false, false, "up"},
+		{"down", false, false, "down"},
+		// veth links often report "unknown"; a carrier or an address means up.
+		{"unknown", false, true, "up"},
+		{"unknown", true, false, "up"},
+		{"", false, false, "down"},
+	}
+	for _, c := range cases {
+		if got := normalizeOperState(c.state, c.carrier, c.hasAdr); got != c.want {
+			t.Errorf("normalizeOperState(%q,%v,%v) = %q, want %q", c.state, c.carrier, c.hasAdr, got, c.want)
+		}
+	}
+}
+
+func TestVirtualInterface(t *testing.T) {
+	// A physical NIC has a `device` symlink; a bridge/veth does not.
+	phys := t.TempDir()
+	if err := os.Symlink("/sys/devices/foo", filepath.Join(phys, "device")); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := virtualInterface(phys); v {
+		t.Error("an interface with a device symlink must not be virtual")
+	}
+
+	// A virtual interface is named after its kind.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docker0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if v, k := virtualInterface(filepath.Join(dir, "docker0")); !v || k != "bridge" {
+		t.Errorf("docker0 = (%v, %q), want (true, bridge)", v, k)
+	}
+	if v, k := virtualInterface(filepath.Join(dir, "veth1a2b")); !v || k != "veth" {
+		t.Errorf("veth1a2b = (%v, %q), want (true, veth)", v, k)
+	}
+	// A bridged interface without a matching name is still detected via sysfs.
+	br := filepath.Join(dir, "lan0")
+	if err := os.MkdirAll(filepath.Join(br, "bridge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if v, k := virtualInterface(br); !v || k != "bridge" {
+		t.Errorf("lan0 bridge = (%v, %q), want (true, bridge)", v, k)
+	}
+}
+
 // ---- embedded databases ----
 
 func TestEmbeddedUSBIDsParsed(t *testing.T) {

@@ -243,11 +243,17 @@ func (r *renderer) renderNetwork(n NetworkInfo) {
 
 	for _, iface := range n.Interfaces {
 		kind := "LAN"
-		if iface.IsWireless {
+		switch {
+		case iface.IsWireless:
 			kind = "Wi-Fi"
+		case iface.Virtual:
+			kind = virtualKindLabel(iface.VKind)
 		}
-		state := r.paint(cGreen, L("активен", "up"))
-		if iface.State != "up" {
+		state := r.paint(cDim, L("неизвестно", "unknown"))
+		switch iface.State {
+		case "up":
+			state = r.paint(cGreen, L("активен", "up"))
+		case "down":
 			state = r.paint(cDim, L("не активен", "down"))
 		}
 		fmt.Printf("  %s [%s]  %s\n", r.paint(cBold, iface.Name), kind, state)
@@ -273,11 +279,32 @@ func (r *renderer) renderNetwork(n NetworkInfo) {
 
 		if iface.IsWireless && iface.Wireless != nil {
 			r.renderWireless(iface.Wireless)
-		} else {
+		} else if !iface.Virtual {
 			r.renderEthernet(iface)
 		}
 		fmt.Println()
 	}
+}
+
+// virtualKindLabel maps a virtual interface sub-type to a short bracketed tag.
+func virtualKindLabel(kind string) string {
+	switch kind {
+	case "bridge":
+		return L("мост", "bridge")
+	case "veth":
+		return "veth"
+	case "tunnel":
+		return L("туннель", "tunnel")
+	case "wireguard":
+		return "WireGuard"
+	case "ppp":
+		return "PPP"
+	case "bond":
+		return L("агрегация", "bond")
+	case "vpn":
+		return "VPN"
+	}
+	return L("виртуальный", "virtual")
 }
 
 func (r *renderer) renderEthernet(iface NetInterface) {

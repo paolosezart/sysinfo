@@ -46,6 +46,11 @@ go vet ./...
   names (`armImplementerName`, `armCoreName`) instead of showing `0x41`.
 - `/proc/cpuinfo` "Model" on ARM is the *board* name (already in SYSTEM), so
   prefer `CPU part` for the CPU block.
+- Virtual netdevs (bridge/veth/tunnel/VPN) are the ones the kernel places under
+  `/sys/devices/virtual/net/`; physical NICs resolve to a bus path. Only the
+  former should skip the LAN-port/cable/speed lines.
+- `operstate` can be "unknown" or missing (common for veth); fall back to
+  carrier/address presence before calling a link "down".
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

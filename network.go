@@ -33,6 +33,8 @@ type NetInterface struct {
 	IPv4       []string
 	IPv6       []string
 	IsWireless bool
+	Virtual    bool   // no backing device in sysfs (bridge, veth, tunnel, ...)
+	VKind      string // virtual sub-type: bridge / veth / tunnel / bond / ...
 	RxBytes    uint64
 	TxBytes    uint64
 	Wireless   *WirelessInfo
@@ -79,11 +81,15 @@ func collectNetworkInfo() NetworkInfo {
 		iface.TxBytes = parseUint(readFileTrim(filepath.Join(base, "statistics/tx_bytes")))
 
 		iface.IPv4, iface.IPv6 = interfaceAddrs(name)
+		iface.State = normalizeOperState(iface.State, iface.Carrier, len(iface.IPv4) > 0 || len(iface.IPv6) > 0)
 
 		// Wireless detection: a `wireless` subdir exists for WiFi devices.
 		if _, err := os.Stat(filepath.Join(base, "wireless")); err == nil {
 			iface.IsWireless = true
 			iface.Wireless = collectWireless(name)
+		} else if iface.Virtual, iface.VKind = virtualInterface(base); iface.Virtual {
+			// Bridges, veth pairs, tunnels and the like have no physical link
+			// layer; treating them as LAN ports would invent a cable/speed line.
 		} else {
 			iface.SpeedMbps, iface.Duplex = ethernetLink(name)
 		}
@@ -96,6 +102,65 @@ func collectNetworkInfo() NetworkInfo {
 		ni.GatewayVendor = lookupMACVendor(ni.GatewayMAC)
 	}
 	return ni
+}
+
+// virtualInterface reports whether an interface is software-defined (bridge,
+// veth, bond, tunnel, VPN, ...) and, if so, a short sub-type. The kernel
+// classifies virtual netdevs under /sys/devices/virtual/net/, which is the
+// authoritative signal; a physical NIC instead resolves to its bus path.
+func virtualInterface(base string) (bool, string) {
+	name := filepath.Base(base)
+	if link, err := os.Readlink(filepath.Join("/sys/class/net", name)); err == nil {
+		if !strings.Contains(link, "/devices/virtual/") {
+			return false, ""
+		}
+		return true, virtualKind(name, base)
+	}
+	// Fall back to the backing-device symlink when the class link is unreadable.
+	if _, err := os.Lstat(filepath.Join(base, "device")); err == nil {
+		return false, ""
+	}
+	return true, virtualKind(name, base)
+}
+
+// virtualKind names the sub-type of a virtual interface, preferring the sysfs
+// marker (a `bridge` directory) over the conventional name prefix.
+func virtualKind(name, base string) string {
+	if _, err := os.Stat(filepath.Join(base, "bridge")); err == nil {
+		return "bridge"
+	}
+	switch {
+	case name == "docker0" || strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "virbr"):
+		return "bridge"
+	case strings.HasPrefix(name, "veth"):
+		return "veth"
+	case strings.HasPrefix(name, "tun") || strings.HasPrefix(name, "tap"):
+		return "tunnel"
+	case strings.HasPrefix(name, "wg"):
+		return "wireguard"
+	case strings.HasPrefix(name, "ppp"):
+		return "ppp"
+	case strings.HasPrefix(name, "bond"):
+		return "bond"
+	case strings.HasPrefix(name, "tailscale") || strings.HasPrefix(name, "zt"):
+		return "vpn"
+	}
+	return "virtual"
+}
+
+// normalizeOperState resolves the many ways the kernel reports an interface as
+// being up. Besides "up"/"down", operstate may be "unknown" (common for veth and
+// other virtual links) or missing entirely; in that case fall back to carrier or
+// the presence of an address so a working interface is not shown as "down".
+func normalizeOperState(state string, carrier, hasAddr bool) string {
+	switch state {
+	case "up", "down":
+		return state
+	}
+	if carrier || hasAddr {
+		return "up"
+	}
+	return "down"
 }
 
 // defaultGateway finds the IPv4 default route and resolves the gateway's MAC
