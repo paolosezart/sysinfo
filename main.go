@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -36,6 +37,11 @@ func main() {
 
 	if *flagHelp || *flagH {
 		printHelp()
+		return
+	}
+
+	if *flagVersion {
+		fmt.Println(versionLine())
 		return
 	}
 
@@ -103,16 +109,17 @@ func main() {
 }
 
 var (
-	flagRU     = flag.Bool("ru", false, L("принудительно русский вывод", "force Russian output"))
-	flagEN     = flag.Bool("en", false, L("принудительно английский вывод", "force English output"))
-	flagHelp   = flag.Bool("help", false, L("показать эту справку", "show this help"))
-	flagH      = flag.Bool("h", false, L("показать эту справку", "show this help"))
-	flagVendor = flag.Bool("vendor", false, L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)"))
-	flagV      = flag.Bool("v", false, L("то же, что --vendor", "same as --vendor"))
-	flagOUI    = flag.Bool("oui", false, L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database"))
-	flagO      = flag.Bool("o", false, L("то же, что --oui", "same as --oui"))
-	flagInst   = flag.Bool("install", false, L("установить утилиту в /usr/local/bin/sysinfo", "install the tool as /usr/local/bin/sysinfo"))
-	flagI      = flag.Bool("i", false, L("то же, что --install", "same as --install"))
+	flagRU      = flag.Bool("ru", false, L("принудительно русский вывод", "force Russian output"))
+	flagEN      = flag.Bool("en", false, L("принудительно английский вывод", "force English output"))
+	flagHelp    = flag.Bool("help", false, L("показать эту справку", "show this help"))
+	flagH       = flag.Bool("h", false, L("показать эту справку", "show this help"))
+	flagVersion = flag.Bool("version", false, L("показать версию и сборку", "show version and build"))
+	flagVendor  = flag.Bool("vendor", false, L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)"))
+	flagV       = flag.Bool("v", false, L("то же, что --vendor", "same as --vendor"))
+	flagOUI     = flag.Bool("oui", false, L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database"))
+	flagO       = flag.Bool("o", false, L("то же, что --oui", "same as --oui"))
+	flagInst    = flag.Bool("install", false, L("установить утилиту в /usr/local/bin/sysinfo", "install the tool as /usr/local/bin/sysinfo"))
+	flagI       = flag.Bool("i", false, L("то же, что --install", "same as --install"))
 
 	flagSystem  = flag.Bool("system", false, L("только блок СИСТЕМА", "only the SYSTEM block"))
 	flagSys     = flag.Bool("sys", false, L("то же, что --system", "same as --system"))
@@ -211,9 +218,7 @@ func installSelf() error {
 	dst := "/usr/local/bin/sysinfo"
 
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("%s", L(
-			"нужны права root: sudo "+exe+" --install",
-			"root is required: sudo "+exe+" --install"))
+		return elevateAndInstall(exe)
 	}
 
 	src, err := os.Open(exe)
@@ -245,6 +250,30 @@ func installSelf() error {
 	return nil
 }
 
+// elevateAndInstall re-runs the same binary with sudo so the user does not have
+// to type the sudo prefix by hand. It only does so when stdin is a terminal:
+// in a script or pipeline there is no password prompt to answer, so we print the
+// exact command to run instead of blocking forever.
+func elevateAndInstall(exe string) error {
+	if fi, err := os.Stdin.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return fmt.Errorf("%s", L(
+			"нужны права root: sudo "+exe+" --install",
+			"root is required: sudo "+exe+" --install"))
+	}
+	sudo, err := exec.LookPath("sudo")
+	if err != nil {
+		return fmt.Errorf("%s", L(
+			"sudo не найден: запустите от root: su -c '"+exe+" --install'",
+			"sudo not found: run as root: su -c '"+exe+" --install'"))
+	}
+	fmt.Fprintln(os.Stderr, L("нужны права root, повышаю через sudo…",
+		"root required, elevating via sudo…"))
+	cmd := exec.Command(sudo, exe, "--install")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// printHelp prints the usage text.
 func printHelp() {
 	h := `sysinfo — ` + L("сводка о системе для Linux и Raspberry Pi",
 		"system summary for Linux and Raspberry Pi") + `
@@ -268,8 +297,9 @@ func printHelp() {
   --no-color          ` + L("без цвета", "disable color") + `
   --ru / --en         ` + L("принудительный язык вывода", "force the output language") + `
   --demo              ` + L("пример вывода для Raspberry Pi 4B", "sample Raspberry Pi 4B report") + `
-  --debug-utmp        ` + L("диагностика чтения сессий (utmp)", "diagnose session reading (utmp)") + `
-  --install, -i       ` + L("установить в /usr/local/bin/sysinfo (нужен root)", "install as /usr/local/bin/sysinfo (needs root)") + `
+  --debug-utmp        ` + L("диагностика чтения сессий (utmp/logind)", "diagnose session reading (utmp/logind)") + `
+  --version           ` + L("версия и сборка", "version and build") + `
+  --install, -i       ` + L("установить в /usr/local/bin/sysinfo (авто sudo)", "install as /usr/local/bin/sysinfo (auto sudo)") + `
   --vendor, -v        ` + L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)") + `
   --oui, -o           ` + L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database") + `
   --help, -h          ` + L("эта справка", "this help") + `

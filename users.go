@@ -103,7 +103,21 @@ type utmpRecord struct {
 // connection type, client address and, where the kernel allows it, the SSH
 // client identification.
 func collectSessions() []SessionInfo {
-	return sessionsFromPath(utmpFile())
+	// systemd 257 removed utmp (no /run/utmp); on those systems logind is the
+	// only source. Prefer it when the file is gone, and fall back to it whenever
+	// utmp yields nothing, so a modern box still lists its sessions.
+	if _, err := os.Stat(utmpFile()); err != nil {
+		if logindAvailable() {
+			return collectLogindSessions()
+		}
+	}
+	sessions := sessionsFromPath(utmpFile())
+	if len(sessions) == 0 && logindAvailable() {
+		if ld := collectLogindSessions(); len(ld) > 0 {
+			return ld
+		}
+	}
+	return sessions
 }
 
 // sessionsFromPath builds the session list from a utmp file, sorted by login
@@ -364,32 +378,42 @@ func utmpSec(rec []byte, lay utmpLayout) int64 {
 	return int64(int32(binary.LittleEndian.Uint32(rec[lay.tvSecOff:])))
 }
 
-// debugUtmp prints why the session list is (or is not) populated: the file it
-// read, its size, and how many records each layout yields. Written for the
-// "no active sessions" report so the cause is visible on the target machine.
+// debugUtmp prints why the session list is (or is not) populated: which source
+// was used, the file it read, its size, and how many records each utmp layout
+// yields. Written for the "no active sessions" report so the cause is visible
+// on the target machine.
 func debugUtmp(w io.Writer) {
+	fmt.Fprintf(w, "version: %s\n", versionLine())
+	fmt.Fprintf(w, "arch: %s, long bit: %d\n", runtime.GOARCH, strconv.IntSize)
 	path := utmpFile()
 	fmt.Fprintf(w, "utmp file: %s\n", path)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(w, "  read error: %v\n", err)
-		return
-	}
-	fmt.Fprintf(w, "  size: %d bytes\n", len(b))
-	for _, lay := range []utmpLayout{utmpCompact, utmpWide} {
-		records, valid := parseUtmp(b, lay)
-		name := "compact"
-		if lay.wide {
-			name = "wide"
+	} else {
+		fmt.Fprintf(w, "  size: %d bytes\n", len(b))
+		for _, lay := range []utmpLayout{utmpCompact, utmpWide} {
+			records, valid := parseUtmp(b, lay)
+			name := "compact"
+			if lay.wide {
+				name = "wide"
+			}
+			fmt.Fprintf(w, "  layout %-7s size=%d ut_session@%d ut_tv@%d: %d records, %d login records, %d trailing bytes\n",
+				name, lay.size, lay.sessionOff, lay.tvSecOff, len(records), valid, len(b)%lay.size)
 		}
-		fmt.Fprintf(w, "  layout %-7s size=%d ut_session@%d ut_tv@%d: %d records, %d login records, %d trailing bytes\n",
-			name, lay.size, lay.sessionOff, lay.tvSecOff, len(records), valid, len(b)%lay.size)
+		fmt.Fprintf(w, "  chosen layout size %d\n", utmpRec.size)
 	}
-	fmt.Fprintf(w, "  arch: %s -> chosen layout size %d\n", runtime.GOARCH, utmpRec.size)
-	sessions := sessionsFromPath(path)
-	fmt.Fprintf(w, "  parsed sessions: %d\n", len(sessions))
+	fmt.Fprintf(w, "  utmp sessions: %d\n", len(sessionsFromPath(path)))
+
+	fmt.Fprintf(w, "logind available: %v\n", logindAvailable())
+	if ids := logindSessionIDs(); len(ids) > 0 {
+		fmt.Fprintf(w, "  logind sessions: %s\n", strings.Join(ids, ", "))
+	}
+
+	sessions := collectSessions()
+	fmt.Fprintf(w, "sessions used in report: %d\n", len(sessions))
 	for _, s := range sessions {
-		fmt.Fprintf(w, "    %s [%s] line=%q remote=%q\n", s.User, s.ConnType, s.Line, s.Remote)
+		fmt.Fprintf(w, "    %s [%s] line=%q remote=%q pid=%d\n", s.User, s.ConnType, s.Line, s.Remote, s.PID)
 	}
 }
 

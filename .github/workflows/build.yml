@@ -32,9 +32,14 @@ jobs:
           - { goarch: amd64, goarm: "",   name: linux-amd64 }
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
+      - name: Resolve version
+        id: ver
+        run: echo "value=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" >> "$GITHUB_OUTPUT"
       - name: Build
         env:
           GOOS: linux
@@ -43,7 +48,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w" -o dist/sysinfo-${{ matrix.name }} .
+          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.ver.outputs.value }}" -o dist/sysinfo-${{ matrix.name }} .
       - uses: actions/upload-artifact@v4
         with:
           name: sysinfo-${{ matrix.name }}
@@ -55,11 +60,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
       - name: Build all targets
-        run: make release
+        run: make release VERSION=${{ github.ref_name }}
       - uses: softprops/action-gh-release@v2
         with:
           files: |

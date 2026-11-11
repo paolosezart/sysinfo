@@ -66,6 +66,16 @@ go vet ./...
   Filter `ut_type == USER_PROCESS` (7). `--debug-utmp` prints the file, size and
   per-layout record counts on the target machine; `SYSINFO_UTMP=<path>` overrides
   the file for testing against a saved copy.
+- Debian 13 (trixie) / systemd 257 builds systemd with `-UTMP`, so `/run/utmp`
+  does not exist at all and the utmp path yields nothing. The session list then
+  comes from systemd-logind via `loginctl`: `list-sessions` gives the roster and
+  `show-session <id>...` prints each session's properties as `Key=Value` blocks.
+  `collectSessions` prefers logind when `/run/utmp` is missing, and also falls
+  back to it when utmp parses to zero sessions, so either source works.
+  `show-session --json` does NOT exist in v257 (only the `list-*` verbs gained
+  JSON), so the text form is parsed. Keep only `Class=user` and
+  `State=active|online`; the manager/greeter/lock-screen sessions would otherwise
+  show as phantom users.
 - `sftp`/`scp` never appear in `utmp`: they are SSH subsystems that run without
   a pty, so sshd records no login entry for them (OpenSSH `mm_pty_allocate` ->
   `mm_record_login` runs only for interactive PTY sessions). Only the

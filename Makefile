@@ -1,6 +1,6 @@
 BINARY := sysinfo
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: all build arm64 arm64-pi3 armhf amd64 test vet fmt clean release
 

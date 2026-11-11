@@ -143,7 +143,8 @@ sysinfo --ru / --en         # принудительный язык
 sysinfo --demo              # пример вывода для Raspberry Pi 4B без железа
 sysinfo --vendor            # обновить базу USB-вендоров (usb.ids)
 sysinfo --oui               # обновить базу MAC-вендоров (IEEE OUI)
-sudo sysinfo --install      # установить в /usr/local/bin/sysinfo
+sysinfo --version           # версия и сборка
+sysinfo --install           # установить в /usr/local/bin/sysinfo (повысит права через sudo)
 ```
 
 Секции: `--system`/`-sys`, `--cpu`/`-c`, `--ram`/`-r`, `--storage`/`-s`,
@@ -188,6 +189,7 @@ sudo sysinfo --install      # установить в /usr/local/bin/sysinfo
 | `iw`      | SSID, канал, ширина полосы, шифрование Wi-Fi    |
 | `ethtool` | скорость и дуплекс, если нет в `/sys`           |
 | `resolvectl` | актуальные DNS-серверы systemd-resolved     |
+| `loginctl` | список сессий на Debian 13 / systemd 257, где нет `/run/utmp` |
 
 Если чего-то нет — секция просто деградирует, утилита не падает.
 
@@ -201,6 +203,14 @@ go test ./...
 Парсеры `/proc` и `/sys` вынесены в отдельные функции, поэтому их можно
 проверять на фикстурах без реального железа — см. `sysinfo_test.go`
 и `extra_test.go`.
+
+Версия встраивается при сборке:
+
+```sh
+go build -ldflags "-X main.version=$(git describe --tags --always)"
+```
+
+`make` и CI подставляют её автоматически; без `-ldflags` значение равно `dev`.
 
 ## Кэш и базы вендоров
 
