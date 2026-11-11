@@ -16,11 +16,12 @@ const cmdTimeout = 3 * time.Second
 
 // options holds the parsed command line.
 type options struct {
-	json     bool
-	noColor  bool
-	demo     bool
-	install  bool
-	sections map[string]bool
+	json      bool
+	noColor   bool
+	demo      bool
+	install   bool
+	sshClient bool
+	sections  map[string]bool
 }
 
 func main() {
@@ -79,6 +80,10 @@ func main() {
 		report = demoReport()
 	} else {
 		sys := collectSystemInfo()
+		sessions := collectSessions()
+		if opts.sshClient {
+			attachSSHClientVersions(sessions)
+		}
 		report = Report{
 			System:    sys,
 			CPU:       collectCPUInfo(),
@@ -88,7 +93,7 @@ func main() {
 			Sensors:   collectSensors(sys),
 			Display:   collectDisplayInfo(),
 			USB:       collectUSBDevices(),
-			Sessions:  collectSessions(),
+			Sessions:  sessions,
 			Locale:    collectLocale(),
 			Generated: time.Now(),
 		}
@@ -139,6 +144,7 @@ var (
 	flagUsers   = flag.Bool("users", false, L("только блок ПОЛЬЗОВАТЕЛИ", "only the USERS block"))
 	flagSess    = flag.Bool("sessions", false, L("то же, что --users", "same as --users"))
 	flagDbgUtmp = flag.Bool("debug-utmp", false, L("диагностика чтения utmp", "diagnose utmp reading"))
+	flagSSHCli  = flag.Bool("ssh-client", false, L("читать версии SSH-клиентов из системного журнала (нужен LogLevel DEBUG)", "read SSH client versions from the system log (needs LogLevel DEBUG)"))
 )
 
 func parseFlags() options {
@@ -182,11 +188,12 @@ func parseFlags() options {
 	}
 
 	return options{
-		json:     *asJSON,
-		noColor:  *noColor,
-		demo:     *demo,
-		install:  *flagInst || *flagI,
-		sections: sections,
+		json:      *asJSON,
+		noColor:   *noColor,
+		demo:      *demo,
+		install:   *flagInst || *flagI,
+		sshClient: *flagSSHCli,
+		sections:  sections,
 	}
 }
 
@@ -298,6 +305,7 @@ func printHelp() {
   --ru / --en         ` + L("принудительный язык вывода", "force the output language") + `
   --demo              ` + L("пример вывода для Raspberry Pi 4B", "sample Raspberry Pi 4B report") + `
   --debug-utmp        ` + L("диагностика чтения сессий (utmp/logind)", "diagnose session reading (utmp/logind)") + `
+  --ssh-client        ` + L("версии SSH-клиентов из журнала (нужен LogLevel DEBUG)", "SSH client versions from the log (needs LogLevel DEBUG)") + `
   --version           ` + L("версия и сборка", "version and build") + `
   --install, -i       ` + L("установить в /usr/local/bin/sysinfo (авто sudo)", "install as /usr/local/bin/sysinfo (auto sudo)") + `
   --vendor, -v        ` + L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)") + `

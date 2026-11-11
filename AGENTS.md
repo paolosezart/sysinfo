@@ -88,12 +88,30 @@ go vet ./...
   `mm_record_login` runs only for interactive PTY sessions). Only the
   interactive SSH login is listed; it cannot be told apart from sftp/scp by
   this data. Do not claim a protocol the data cannot show.
-- There is NO SSH client version/name in the data. OpenSSH exports only
-  `SSH_CLIENT`, `SSH_CONNECTION` and `SSH_TTY` to the session environment; a
+- There is NO SSH client version/name in the session environment. OpenSSH
+  exports only `SSH_CLIENT`, `SSH_CONNECTION` and `SSH_TTY`; a
   `SSH_CLIENT_VERSION` variable does not exist (verified against the OpenSSH
   tree — 0 hits). An earlier revision read it and always got "". Do not
   reintroduce it. The only real remote datum is the peer address, from
   `SSH_CONNECTION` (`/proc/<pid>/environ`, root or same uid) or the utmp host.
+- The client version IS in the log, but only at LogLevel DEBUG: kex.c logs
+  `debug("Remote protocol version %d.%d, remote software version %.100s")`, and
+  `debug()` is SYSLOG_LEVEL_DEBUG1, one step ABOVE VERBOSE (see log.h). So a
+  stock `LogLevel INFO` sshd never writes it; `VERBOSE` is not enough either.
+  `--ssh-client` reads it anyway, best effort. The version line carries no
+  address, so it is paired with the address from the VERBOSE `Connection from
+  <ip> port <n> on ...` line (sshd-session.c) by the shared `[pid]` syslog
+  prefix. Key the result by address, NOT by PID: the logging PID is the sshd
+  session process, not the logind `Leader` PID.
+- Idle time comes from the tty device atime, the same source `w` uses
+  (`stat` on `/dev/pts/N` or `/dev/ttyN`, `st.Atim`). logind's IdleHint /
+  IdleSinceHint are only populated for graphical sessions (`SESSION_TYPE_IS_GRAPHICAL`
+  in logind-session.c) and stay `0`/`no` for tty/ssh, so they are useless here.
+  `os.FileInfo` does not expose atime — read `syscall.Stat_t.Atim`.
+- A remote session with an empty `TTY` is a non-interactive SSH connection
+  (`sftp`, `scp`, `rsync`, `ssh -N`); sshd shows it as `user@notty`. It has no
+  utmp entry, only a logind session. Label it "SSH without terminal" — the data
+  cannot say which protocol it is.
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

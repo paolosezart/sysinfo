@@ -129,6 +129,7 @@ func logindToSession(s logindSession) (SessionInfo, bool) {
 		si.ConnType = "local"
 		si.Detail = sessionDesktop(s)
 	}
+	si.Idle = ttyIdle(si.Line)
 	return si, true
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -219,6 +220,169 @@ func TestSSHPeerFromEnviron(t *testing.T) {
 	}
 	if got := sshPeerFromEnviron(nil); got != "" {
 		t.Errorf("peer(nil) = %q, want empty", got)
+	}
+}
+
+// idleSince turns an access time into the human idle string, and refuses to
+// report a negative gap when the clock is skewed.
+func TestIdleSince(t *testing.T) {
+	now := time.Date(2026, 11, 12, 4, 24, 38, 0, time.Local)
+	cases := []struct {
+		name  string
+		atime time.Time
+		want  string
+	}{
+		{"two seconds", now.Add(-2 * time.Second), "2 с"},
+		{"eight hours", now.Add(-8*time.Hour - 13*time.Minute), "8 ч 13 мин 0 с"},
+		{"future atime", now.Add(5 * time.Minute), ""},
+		{"zero atime", time.Time{}, ""},
+	}
+	for _, c := range cases {
+		if got := idleSince(c.atime, now); got != c.want {
+			t.Errorf("%s: idleSince = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// ttyDevicePath maps utmp/logind line names onto device nodes.
+func TestTtyDevicePath(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"tty1", "/dev/tty1", true},
+		{"pts/0", "/dev/pts/0", true},
+		{"/dev/pts/3", "/dev/pts/3", true},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		got, ok := ttyDevicePath(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("ttyDevicePath(%q) = (%q, %v), want (%q, %v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// A remote session with no tty is a non-interactive SSH connection and must be
+// labelled distinctly from an interactive one.
+func TestSessionLabel(t *testing.T) {
+	cases := []struct {
+		s    SessionInfo
+		want string
+	}{
+		{SessionInfo{ConnType: "ssh", Line: "pts/0"}, "SSH"},
+		{SessionInfo{ConnType: "ssh", Line: ""}, L("SSH без терминала", "SSH, no terminal")},
+		{SessionInfo{ConnType: "local", Type: "x11"}, L("рабочий стол", "desktop")},
+		{SessionInfo{ConnType: "local", Type: "wayland"}, L("рабочий стол", "desktop")},
+		{SessionInfo{ConnType: "local", Type: "tty"}, L("локальный терминал", "local terminal")},
+	}
+	for _, c := range cases {
+		if got := sessionLabel(c.s); got != c.want {
+			t.Errorf("sessionLabel(%+v) = %q, want %q", c.s, got, c.want)
+		}
+	}
+}
+
+// mergeSSHClientVersions pairs a logged client version with the peer address.
+// The version line has no address, so the shared sshd PID prefix is what links
+// it to the "Connection from <ip>" line.
+func TestMergeSSHClientVersions(t *testing.T) {
+	log := strings.Join([]string{
+		`ноя 12 04:24:20 host sshd-session[646547]: Connection from 192.168.100.234 port 9807 on 192.168.100.10 port 22`,
+		`ноя 12 04:24:20 host sshd-session[646547]: debug1: Remote protocol version 2.0, remote software version OpenSSH_9.6p1 Ubuntu-3ubuntu13`,
+		`ноя 12 04:24:24 host sshd-session[646623]: Connection from 10.8.0.5 port 51000 on 192.168.100.10 port 22`,
+		`ноя 12 04:24:24 host sshd-session[646623]: debug1: Remote protocol version 2.0, remote software version PuTTY_Release_0.80`,
+		`ноя 12 04:24:30 host sshd-session[646700]: debug1: Remote protocol version 2.0, remote software version NoAddressLine`,
+	}, "\n")
+
+	got := map[string]string{}
+	mergeSSHClientVersions(got, log)
+
+	if got["192.168.100.234"] != "OpenSSH_9.6p1 Ubuntu-3ubuntu13" {
+		t.Errorf("192.168.100.234 = %q", got["192.168.100.234"])
+	}
+	if got["10.8.0.5"] != "PuTTY_Release_0.80" {
+		t.Errorf("10.8.0.5 = %q", got["10.8.0.5"])
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d entries, want 2: %+v", len(got), got)
+	}
+}
+
+// applyClientVersions must only touch SSH sessions that have a peer address.
+func TestApplyClientVersions(t *testing.T) {
+	sessions := []SessionInfo{
+		{User: "raspi", ConnType: "ssh", Remote: "192.168.100.234"},
+		{User: "raspi", ConnType: "local", Type: "x11", Remote: "192.168.100.234"},
+		{User: "admin", ConnType: "ssh", Remote: "10.0.0.9"},
+	}
+	applyClientVersions(sessions, map[string]string{"192.168.100.234": "OpenSSH_9.6p1"})
+
+	if sessions[0].Client != "OpenSSH_9.6p1" {
+		t.Errorf("ssh session Client = %q, want OpenSSH_9.6p1", sessions[0].Client)
+	}
+	if sessions[1].Client != "" {
+		t.Errorf("local session got a client version: %q", sessions[1].Client)
+	}
+	if sessions[2].Client != "" {
+		t.Errorf("unknown address got a client version: %q", sessions[2].Client)
+	}
+}
+
+// connectionFromIP and remoteSoftwareVersion read the two halves of a session's
+// log pair.
+func TestSSHLogMarkers(t *testing.T) {
+	conn := `ноя 12 04:24:20 host sshd-session[1]: Connection from 192.168.100.234 port 9807 on 192.168.100.10 port 22`
+	if got := connectionFromIP(conn); got != "192.168.100.234" {
+		t.Errorf("connectionFromIP = %q", got)
+	}
+	ver := `ноя 12 04:24:20 host sshd-session[1]: debug1: Remote protocol version 2.0, remote software version OpenSSH_9.6p1`
+	if got := remoteSoftwareVersion(ver); got != "OpenSSH_9.6p1" {
+		t.Errorf("remoteSoftwareVersion = %q", got)
+	}
+	if got := connectionFromIP("no marker here"); got != "" {
+		t.Errorf("connectionFromIP(no marker) = %q", got)
+	}
+	if got := remoteSoftwareVersion("no marker here"); got != "" {
+		t.Errorf("remoteSoftwareVersion(no marker) = %q", got)
+	}
+}
+
+// syslogPID reads the bracketed PID from a log line prefix.
+func TestSyslogPID(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"ноя 12 04:24:20 host sshd-session[646547]: hello", 646547},
+		{"2026-11-12T04:24:20 host sshd[123]: hi", 123},
+		{"no pid here", 0},
+		{"unclosed[42", 0},
+		{"nonnumeric[x]:", 0},
+	}
+	for _, c := range cases {
+		if got := syslogPID(c.in); got != c.want {
+			t.Errorf("syslogPID(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// sshLogSince returns the earliest SSH login time, and "" when there is no SSH
+// session to look up.
+func TestSSHLogSince(t *testing.T) {
+	sessions := []SessionInfo{
+		{ConnType: "local", Type: "x11", LoginTime: "11.11.2026 20:06:11"},
+		{ConnType: "ssh", LoginTime: "11.11.2026 20:11:22", PID: 1},
+		{ConnType: "ssh", LoginTime: "11.11.2026 19:05:00", PID: 2},
+	}
+	got := sshLogSince(sessions)
+	want := time.Date(2026, 11, 11, 19, 5, 0, 0, time.Local).Format("2006-01-02 15:04:05")
+	if got != want {
+		t.Errorf("sshLogSince = %q, want %q", got, want)
+	}
+	if got := sshLogSince([]SessionInfo{{ConnType: "local"}}); got != "" {
+		t.Errorf("sshLogSince with no SSH sessions = %q, want empty", got)
 	}
 }
 

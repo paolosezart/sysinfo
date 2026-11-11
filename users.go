@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -25,7 +26,9 @@ type SessionInfo struct {
 	Detail    string `json:"detail,omitempty"` // desktop name or session service
 	Remote    string `json:"remote,omitempty"` // client address for remote sessions
 	RemoteDNS string `json:"remote_dns,omitempty"`
-	LoginTime string `json:"login_time"` // preformatted, locale independent
+	LoginTime string `json:"login_time"`       // preformatted, locale independent
+	Idle      string `json:"idle,omitempty"`   // inactivity, from the tty atime (like `w`)
+	Client    string `json:"client,omitempty"` // sshd client version, best effort
 	SessionID string `json:"session_id,omitempty"`
 	PID       int    `json:"pid,omitempty"`
 }
@@ -151,6 +154,7 @@ func sessionsFromPath(path string) []SessionInfo {
 		if s.Remote != "" {
 			s.RemoteDNS = reverseDNS(s.Remote)
 		}
+		s.Idle = ttyIdle(s.Line)
 		out = append(out, s)
 	}
 
@@ -229,6 +233,150 @@ func procEnviron(pid int32) []byte {
 		return nil
 	}
 	return b
+}
+
+// sshLogTimeout bounds the journal read; a large journal must not stall the
+// report, so a slow or missing log simply yields no client versions.
+const sshLogTimeout = 5 * time.Second
+
+// attachSSHClientVersions fills each SSH session's Client from the system log.
+// It is best effort: when sshd does not log the version (the default) the map is
+// empty and every Client stays blank.
+func attachSSHClientVersions(sessions []SessionInfo) {
+	applyClientVersions(sessions, sshClientVersions(sessions))
+}
+
+// applyClientVersions copies an IP->version map onto the SSH sessions.
+func applyClientVersions(sessions []SessionInfo, versions map[string]string) {
+	if len(versions) == 0 {
+		return
+	}
+	for i := range sessions {
+		if sessions[i].ConnType != "ssh" || sessions[i].Remote == "" {
+			continue
+		}
+		if v, ok := versions[sessions[i].Remote]; ok {
+			sessions[i].Client = v
+		}
+	}
+}
+
+// sshClientVersions maps a client address to the SSH client software version it
+// announced, as recorded in the system log. OpenSSH logs the version only at
+// LogLevel DEBUG (the message is a debug() call in kex.c, one step above
+// VERBOSE), and only to syslog/journald, so a stock sshd at LogLevel INFO leaves
+// the log empty and this returns nothing. Any failure is swallowed.
+func sshClientVersions(sessions []SessionInfo) map[string]string {
+	versions := map[string]string{}
+	since := sshLogSince(sessions)
+	if since == "" {
+		return versions
+	}
+	for _, unit := range []string{"ssh", "sshd"} {
+		out, err := runCmd(sshLogTimeout, "journalctl",
+			"-u", unit, "--no-pager", "-o", "short", "--since", since)
+		if err == nil {
+			mergeSSHClientVersions(versions, out)
+		}
+	}
+	if b, err := os.ReadFile("/var/log/auth.log"); err == nil {
+		mergeSSHClientVersions(versions, string(b))
+	}
+	return versions
+}
+
+// sshLogSince returns the lower bound for the log search: the earliest SSH login
+// time, so the query covers every session in the list. Empty when there is no
+// SSH session to enrich.
+func sshLogSince(sessions []SessionInfo) string {
+	earliest := time.Time{}
+	for _, s := range sessions {
+		if s.ConnType != "ssh" || s.PID <= 0 || s.LoginTime == "" {
+			continue
+		}
+		t, err := time.ParseInLocation("02.01.2006 15:04:05", s.LoginTime, time.Local)
+		if err != nil {
+			continue
+		}
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	if earliest.IsZero() {
+		return ""
+	}
+	return earliest.Format("2006-01-02 15:04:05")
+}
+
+// mergeSSHClientVersions correlates the announced client version with the peer
+// address. The version line ("remote software version X") carries no address,
+// but sshd logs the address separately at VERBOSE ("Connection from <ip> port
+// <n> ..."), and both come from the same sshd process, so the shared PID prefix
+// links them. The result is keyed by address, because the PID of the logging
+// process is not the session leader PID that logind reports.
+func mergeSSHClientVersions(out map[string]string, log string) {
+	ipByPID := map[int]string{}
+	verByPID := map[int]string{}
+	for _, line := range strings.Split(log, "\n") {
+		pid := syslogPID(line)
+		if pid == 0 {
+			continue
+		}
+		if ip := connectionFromIP(line); ip != "" {
+			ipByPID[pid] = ip
+		}
+		if v := remoteSoftwareVersion(line); v != "" {
+			verByPID[pid] = v
+		}
+	}
+	for pid, v := range verByPID {
+		if ip, ok := ipByPID[pid]; ok {
+			out[ip] = v
+		}
+	}
+}
+
+// connectionFromIP extracts the peer address from a verbose "Connection from
+// <ip> port <n> ..." line.
+func connectionFromIP(line string) string {
+	const marker = "Connection from "
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := line[i+len(marker):]
+	if j := strings.Index(rest, " port "); j > 0 {
+		return rest[:j]
+	}
+	return ""
+}
+
+// remoteSoftwareVersion extracts the client software version from a debug
+// "remote software version <v>" line.
+func remoteSoftwareVersion(line string) string {
+	const marker = "remote software version "
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(line[i+len(marker):])
+}
+
+// syslogPID extracts the PID from a "[1234]" syslog prefix.
+func syslogPID(line string) int {
+	open := strings.IndexByte(line, '[')
+	if open < 0 {
+		return 0
+	}
+	end := strings.IndexByte(line[open:], ']')
+	if end < 0 {
+		return 0
+	}
+	pid, err := strconv.Atoi(line[open+1 : open+end])
+	if err != nil {
+		return 0
+	}
+	return pid
 }
 
 // utmpFile returns the login record file, honouring the common paths. An
@@ -400,6 +548,57 @@ func orNone(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// ttyIdle reports how long the terminal device has been untouched, the same
+// measure `w` uses: the file's access time. logind's own IdleHint/IdleSinceHint
+// are only populated for graphical sessions and stay empty for tty/ssh, so the
+// atime is the only source that covers every session type. Returns "" when the
+// device is unknown or the clock looks skewed.
+func ttyIdle(line string) string {
+	dev, ok := ttyDevicePath(line)
+	if !ok {
+		return ""
+	}
+	fi, err := os.Stat(dev)
+	if err != nil {
+		return ""
+	}
+	atime, ok := fileAtime(fi)
+	if !ok {
+		return ""
+	}
+	return idleSince(atime, time.Now())
+}
+
+// fileAtime extracts the access time, which os.FileInfo does not expose.
+func fileAtime(fi os.FileInfo) (time.Time, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.Unix(st.Atim.Sec, st.Atim.Nsec), true
+}
+
+// idleSince formats the gap between an access time and now, or "" when the
+// times are unusable (zero, or a future timestamp from a skewed clock).
+func idleSince(atime, now time.Time) string {
+	if atime.IsZero() || now.Before(atime) {
+		return ""
+	}
+	return humanDuration(now.Sub(atime))
+}
+
+// ttyDevicePath maps a utmp/logind line ("tty1", "pts/0") to its device node.
+func ttyDevicePath(line string) (string, bool) {
+	switch {
+	case line == "":
+		return "", false
+	case strings.HasPrefix(line, "/dev/"):
+		return line, true
+	default:
+		return "/dev/" + line, true
+	}
 }
 
 // reverseDNS resolves an address to a host name, bounded by cmdTimeout so a

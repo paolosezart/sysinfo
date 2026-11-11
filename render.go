@@ -608,11 +608,14 @@ func summarizeFeatures(features []string) string {
 	return strings.Join(found, ", ")
 }
 
-// sessionLabel renders the session kind for display: SSH, a graphical desktop
-// or a plain local terminal. The distinction between desktop and terminal comes
-// from logind's session Type; utmp can only say "local".
+// sessionLabel renders the session kind for display: SSH, SSH without a
+// terminal, a graphical desktop or a plain local terminal. A remote session
+// with no tty is a non-interactive SSH connection (sftp, scp, rsync, a tunnel);
+// the data cannot say which, so the label stays generic.
 func sessionLabel(s SessionInfo) string {
 	switch {
+	case s.ConnType == "ssh" && s.Line == "":
+		return L("SSH без терминала", "SSH, no terminal")
 	case s.ConnType == "ssh":
 		return "SSH"
 	case s.Type == "x11" || s.Type == "wayland":
@@ -623,7 +626,11 @@ func sessionLabel(s SessionInfo) string {
 }
 
 func (r *renderer) renderUsers(sessions []SessionInfo) {
-	r.header(L("ПОЛЬЗОВАТЕЛИ", "USERS"))
+	title := L("ПОЛЬЗОВАТЕЛИ", "USERS")
+	if len(sessions) > 0 {
+		title += fmt.Sprintf(" (%d)", len(sessions))
+	}
+	r.header(title)
 	if len(sessions) == 0 {
 		fmt.Println("  " + r.paint(cDim, L("нет активных сессий", "no active sessions")))
 		return
@@ -641,6 +648,12 @@ func (r *renderer) renderUsers(sessions []SessionInfo) {
 		fmt.Printf("  %s\n", head)
 		if s.LoginTime != "" {
 			r.kvIndent(L("Время входа", "Login time"), s.LoginTime)
+		}
+		if s.Idle != "" {
+			r.kvIndent(L("Простой", "Idle"), s.Idle)
+		}
+		if s.Client != "" {
+			r.kvIndent(L("Клиент", "Client"), s.Client)
 		}
 		if s.Detail != "" {
 			label := L("Служба", "Service")
