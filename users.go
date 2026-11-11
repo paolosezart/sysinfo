@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,24 +27,46 @@ type SessionInfo struct {
 	PID       int    `json:"pid,omitempty"`
 }
 
-// utmp record layout (Linux, /usr/include/bits/utmp.h): 384 bytes. The trailing
-// padding is dropped because every field we read precedes it.
+// utmp record layout (Linux, glibc /usr/include/bits/utmp.h).
+//
+// glibc keeps the ut_session/ut_tv fields 32-bit only on targets where
+// __WORDSIZE_TIME64_COMPAT32 is 1, so that 32- and 64-bit processes can share
+// the file. On the remaining 64-bit targets (aarch64, s390x, loong64) ut_session
+// is a 64-bit long and ut_tv a 16-byte struct timeval, which makes the record
+// 400 bytes instead of 384. Everything up to and including ut_host has the same
+// offset either way.
 const (
-	utmpRecordSize  = 384
-	utLineOffset    = 8
-	utLineLen       = 32
-	utUserOffset    = 44
-	utUserLen       = 32
-	utHostOffset    = 76
-	utHostLen       = 256
-	utSessionOffset = 336
-	utTVSecOffset   = 340
+	utLineOffset = 8
+	utLineLen    = 32
+	utUserOffset = 44
+	utUserLen    = 32
+	utHostOffset = 76
+	utHostLen    = 256
 )
 
 const (
 	utEmpty       = 0
 	utUserProcess = 7
 )
+
+// utmpLayout describes the trailing (architecture-dependent) part of a record.
+type utmpLayout struct {
+	size       int
+	sessionOff int
+	tvSecOff   int
+	wide       bool // ut_session is a 64-bit long and ut_tv is a struct timeval
+}
+
+func utmpLayoutFor(goarch string) utmpLayout {
+	switch goarch {
+	case "arm64", "s390x", "loong64":
+		return utmpLayout{size: 400, sessionOff: 344, tvSecOff: 352, wide: true}
+	default:
+		return utmpLayout{size: 384, sessionOff: 336, tvSecOff: 340}
+	}
+}
+
+var utmpRec = utmpLayoutFor(runtime.GOARCH)
 
 type utmpRecord struct {
 	typ       int16
@@ -125,8 +148,11 @@ func classifySession(r utmpRecord) (remote, client string) {
 
 // sessionConnType maps a utmp record to a connection type. The kernel keeps no
 // protocol tag, so the classification is heuristic: a pts device with a client
-// address is a remote (SSH) login, everything else is local. sftp and scp ride
-// the same SSH transport and cannot be told apart from utmp alone.
+// address is a remote (SSH) login, everything else is local. sftp and scp are
+// not separate: both are SSH subsystems that run without a pty, so sshd records
+// no utmp entry for them and they never appear here. Only the interactive SSH
+// login (and its own PTY) is listed, which is why sftp/scp cannot be told apart
+// from a plain SSH session by this data.
 func sessionConnType(r utmpRecord) string {
 	if strings.HasPrefix(r.line, "pts/") || (r.host != "" && r.host != ":0") {
 		return "ssh"
@@ -210,31 +236,50 @@ func utmpFile() string {
 // readUtmp parses the fixed-width utmp records. Records of every type are
 // returned; callers filter. A trailing partial record is ignored.
 func readUtmp(path string) ([]utmpRecord, error) {
+	return readUtmpWith(path, utmpRec)
+}
+
+// readUtmpWith parses utmp records using an explicit layout, so the parser can
+// be exercised for every architecture regardless of the host it runs on.
+func readUtmpWith(path string, lay utmpLayout) ([]utmpRecord, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	var out []utmpRecord
-	for off := 0; off+utmpRecordSize <= len(b); off += utmpRecordSize {
-		rec := b[off : off+utmpRecordSize]
+	for off := 0; off+lay.size <= len(b); off += lay.size {
+		rec := b[off : off+lay.size]
 		t := int16(binary.LittleEndian.Uint16(rec[0:]))
 		if t == utEmpty {
 			continue
 		}
 		r := utmpRecord{
-			typ:     t,
-			pid:     int32(binary.LittleEndian.Uint32(rec[4:])),
-			line:    cstr(rec[utLineOffset : utLineOffset+utLineLen]),
-			user:    cstr(rec[utUserOffset : utUserOffset+utUserLen]),
-			host:    cstr(rec[utHostOffset : utHostOffset+utHostLen]),
-			session: int64(binary.LittleEndian.Uint32(rec[utSessionOffset:])),
+			typ:  t,
+			pid:  int32(binary.LittleEndian.Uint32(rec[4:])),
+			line: cstr(rec[utLineOffset : utLineOffset+utLineLen]),
+			user: cstr(rec[utUserOffset : utUserOffset+utUserLen]),
+			host: cstr(rec[utHostOffset : utHostOffset+utHostLen]),
 		}
-		if sec := int64(int32(binary.LittleEndian.Uint32(rec[utTVSecOffset:]))); sec > 0 {
+		if sec := utmpSec(rec, lay); sec > 0 {
 			r.loginTime = time.Unix(sec, 0)
+		}
+		if lay.wide {
+			r.session = int64(binary.LittleEndian.Uint64(rec[lay.sessionOff:]))
+		} else {
+			r.session = int64(binary.LittleEndian.Uint32(rec[lay.sessionOff:]))
 		}
 		out = append(out, r)
 	}
 	return out, nil
+}
+
+// utmpSec reads the login timestamp. The wide layout stores tv_sec as a signed
+// 64-bit value in a struct timeval; the compact one as a signed 32-bit value.
+func utmpSec(rec []byte, lay utmpLayout) int64 {
+	if lay.wide {
+		return int64(binary.LittleEndian.Uint64(rec[lay.tvSecOff:]))
+	}
+	return int64(int32(binary.LittleEndian.Uint32(rec[lay.tvSecOff:])))
 }
 
 // reverseDNS resolves an address to a host name, bounded by cmdTimeout so a

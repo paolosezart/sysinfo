@@ -31,7 +31,7 @@ go vet ./...
   curl -sL https://raw.githubusercontent.com/gentoo/hwids/master/usb.ids |
     gzip -9 > data/usb.ids.gz
   ```
-  Then bump `sysinfo/1.2` in the `User-Agent` if the format changed.
+  Then bump `sysinfo/1.3` in the `User-Agent` if the format changed.
 
 ## Data sources (learned the hard way)
 - SD speed class is NOT in the CSD. It lives in the SD Status register (`ssr`),
@@ -51,10 +51,21 @@ go vet ./...
   former should skip the LAN-port/cable/speed lines.
 - `operstate` can be "unknown" or missing (common for veth); fall back to
   carrier/address presence before calling a link "down".
-- Logged-in sessions come from `utmp` (`/run/utmp`), a fixed 384-byte record
-  layout (`ut_type`@0, `ut_pid`@4, `ut_line`@8, `ut_user`@44, `ut_host`@76,
-  `ut_session`@336, `ut_tv`@340, little-endian on the supported platforms).
-  Filter `ut_type == USER_PROCESS` (7).
+- Logged-in sessions come from `utmp` (`/run/utmp`). The record layout is
+  architecture dependent: fields up to `ut_host` are fixed (`ut_type`@0,
+  `ut_pid`@4, `ut_line`@8, `ut_user`@44, `ut_host`@76), but `ut_session` and
+  `ut_tv` are 32-bit only where glibc sets `__WORDSIZE_TIME64_COMPAT32=1`.
+  amd64/armv7/386/riscv64/ppc64/sparc64/mips keep the 384-byte record
+  (`ut_session`@336, `ut_tv.tv_sec`@340); arm64/s390x/loong64 use the wide
+  400-byte record (`ut_session`@344, `ut_tv.tv_sec`@352) because there
+  `ut_session` is a 64-bit long and `ut_tv` a 16-byte `struct timeval`. Parsing
+  aarch64 with the 384-byte stride silently yields nothing, so the size must be
+  chosen per `GOARCH` (`utmpLayoutFor`). Filter `ut_type == USER_PROCESS` (7).
+- `sftp`/`scp` never appear in `utmp`: they are SSH subsystems that run without
+  a pty, so sshd records no login entry for them (OpenSSH `mm_pty_allocate` ->
+  `mm_record_login` runs only for interactive PTY sessions). Only the
+  interactive SSH login is listed; it cannot be told apart from sftp/scp by
+  this data. Do not claim a protocol the data cannot show.
 - The SSH client version is not in utmp. sshd exports `SSH_CLIENT_VERSION` /
   `SSH_CONNECTION` to the session, so it is only readable from that process's
   `/proc/<pid>/environ` (root, or same uid). Treat the client field as

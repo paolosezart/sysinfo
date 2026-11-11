@@ -8,57 +8,92 @@ import (
 	"time"
 )
 
-// buildUtmpRecord lays out one Linux utmp record (384 bytes) with the fields the
-// parser reads. It mirrors /usr/include/bits/utmp.h.
-func buildUtmpRecord(typ int16, pid int32, line, user, host string, session uint32, tvSec uint32) []byte {
-	rec := make([]byte, utmpRecordSize)
+// buildUtmpRecord lays out one Linux utmp record with the fields the parser
+// reads, using the given layout. It mirrors /usr/include/bits/utmp.h.
+func buildUtmpRecord(lay utmpLayout, typ int16, pid int32, line, user, host string, session uint32, tvSec uint32) []byte {
+	rec := make([]byte, lay.size)
 	binary.LittleEndian.PutUint16(rec[0:], uint16(typ))
 	binary.LittleEndian.PutUint32(rec[4:], uint32(pid))
 	copy(rec[utLineOffset:utLineOffset+utLineLen], line)
 	copy(rec[utUserOffset:utUserOffset+utUserLen], user)
 	copy(rec[utHostOffset:utHostOffset+utHostLen], host)
-	binary.LittleEndian.PutUint32(rec[utSessionOffset:], session)
-	binary.LittleEndian.PutUint32(rec[utTVSecOffset:], tvSec)
+	if lay.wide {
+		binary.LittleEndian.PutUint64(rec[lay.sessionOff:], uint64(session))
+		binary.LittleEndian.PutUint64(rec[lay.tvSecOff:], uint64(tvSec))
+	} else {
+		binary.LittleEndian.PutUint32(rec[lay.sessionOff:], session)
+		binary.LittleEndian.PutUint32(rec[lay.tvSecOff:], tvSec)
+	}
 	return rec
 }
 
+// The two layouts glibc produces: compact (amd64, armv7, riscv64, …) and wide
+// (aarch64, s390x, loong64).
+var (
+	compactLayout = utmpLayout{size: 384, sessionOff: 336, tvSecOff: 340}
+	wideLayout    = utmpLayout{size: 400, sessionOff: 344, tvSecOff: 352, wide: true}
+)
+
+func TestUtmpLayoutFor(t *testing.T) {
+	cases := []struct {
+		arch string
+		want int
+	}{
+		{"amd64", 384},
+		{"arm", 384},
+		{"386", 384},
+		{"riscv64", 384},
+		{"ppc64le", 384},
+		{"arm64", 400},
+		{"s390x", 400},
+		{"loong64", 400},
+	}
+	for _, c := range cases {
+		if got := utmpLayoutFor(c.arch).size; got != c.want {
+			t.Errorf("utmpLayoutFor(%q).size = %d, want %d", c.arch, got, c.want)
+		}
+	}
+}
+
 func TestReadUtmp(t *testing.T) {
-	var buf []byte
-	// A BOOT_TIME record must be ignored by the session filter.
-	buf = append(buf, buildUtmpRecord(2, 0, "", "", "", 0, 1700000000)...)
-	buf = append(buf, buildUtmpRecord(utUserProcess, 812, "tty1", "raspi", "", 1, 1700000100)...)
-	buf = append(buf, buildUtmpRecord(utUserProcess, 1842, "pts/0", "raspi", "192.168.100.42", 3, 1700000200)...)
-	// A trailing partial record must not panic or be parsed.
-	buf = append(buf, []byte{0x07, 0x00}...)
+	for _, lay := range []utmpLayout{compactLayout, wideLayout} {
+		var buf []byte
+		// A BOOT_TIME record must be ignored by the session filter.
+		buf = append(buf, buildUtmpRecord(lay, 2, 0, "", "", "", 0, 1700000000)...)
+		buf = append(buf, buildUtmpRecord(lay, utUserProcess, 812, "tty1", "raspi", "", 1, 1700000100)...)
+		buf = append(buf, buildUtmpRecord(lay, utUserProcess, 1842, "pts/0", "raspi", "192.168.100.42", 3, 1700000200)...)
+		// A trailing partial record must not panic or be parsed.
+		buf = append(buf, []byte{0x07, 0x00}...)
 
-	path := filepath.Join(t.TempDir(), "utmp")
-	if err := os.WriteFile(path, buf, 0o644); err != nil {
-		t.Fatal(err)
-	}
+		path := filepath.Join(t.TempDir(), "utmp")
+		if err := os.WriteFile(path, buf, 0o644); err != nil {
+			t.Fatal(err)
+		}
 
-	recs, err := readUtmp(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(recs) != 3 {
-		t.Fatalf("got %d records, want 3", len(recs))
-	}
-	if recs[1].user != "raspi" || recs[1].line != "tty1" || recs[1].pid != 812 {
-		t.Errorf("record 1 = %+v", recs[1])
-	}
-	if recs[2].host != "192.168.100.42" || recs[2].session != 3 {
-		t.Errorf("record 2 = %+v", recs[2])
-	}
-	if got := recs[1].loginTime.Unix(); got != 1700000100 {
-		t.Errorf("loginTime = %d, want 1700000100", got)
+		recs, err := readUtmpWith(path, lay)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recs) != 3 {
+			t.Fatalf("layout %d: got %d records, want 3", lay.size, len(recs))
+		}
+		if recs[1].user != "raspi" || recs[1].line != "tty1" || recs[1].pid != 812 {
+			t.Errorf("layout %d: record 1 = %+v", lay.size, recs[1])
+		}
+		if recs[2].host != "192.168.100.42" || recs[2].session != 3 {
+			t.Errorf("layout %d: record 2 = %+v", lay.size, recs[2])
+		}
+		if got := recs[1].loginTime.Unix(); got != 1700000100 {
+			t.Errorf("layout %d: loginTime = %d, want 1700000100", lay.size, got)
+		}
 	}
 }
 
 func TestSessionsFromPath(t *testing.T) {
 	var buf []byte
-	buf = append(buf, buildUtmpRecord(2, 0, "", "", "", 0, 1700000000)...)
-	buf = append(buf, buildUtmpRecord(utUserProcess, 812, "tty1", "raspi", "", 1, 1700000100)...)
-	buf = append(buf, buildUtmpRecord(utUserProcess, 1842, "pts/0", "alice", "203.0.113.9", 3, 1700000200)...)
+	buf = append(buf, buildUtmpRecord(compactLayout, 2, 0, "", "", "", 0, 1700000000)...)
+	buf = append(buf, buildUtmpRecord(compactLayout, utUserProcess, 812, "tty1", "raspi", "", 1, 1700000100)...)
+	buf = append(buf, buildUtmpRecord(compactLayout, utUserProcess, 1842, "pts/0", "alice", "203.0.113.9", 3, 1700000200)...)
 
 	path := filepath.Join(t.TempDir(), "utmp")
 	if err := os.WriteFile(path, buf, 0o644); err != nil {
