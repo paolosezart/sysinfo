@@ -571,13 +571,15 @@ func ttyIdle(line string) string {
 	return idleSince(atime, time.Now())
 }
 
-// fileAtime extracts the access time, which os.FileInfo does not expose.
+// fileAtime extracts the access time, which os.FileInfo does not expose. The
+// fields are int64 on 64-bit platforms and int32 on 32-bit ones (e.g. armv7),
+// so the values are widened explicitly.
 func fileAtime(fi os.FileInfo) (time.Time, bool) {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return time.Time{}, false
 	}
-	return time.Unix(st.Atim.Sec, st.Atim.Nsec), true
+	return time.Unix(int64(st.Atim.Sec), int64(st.Atim.Nsec)), true
 }
 
 // idleSince formats the gap between an access time and now, or "" when the
