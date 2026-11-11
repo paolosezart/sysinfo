@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -163,5 +166,127 @@ func TestSDBase(t *testing.T) {
 	writeFixture(t, filepath.Join(dir, "device"), "csd", "0000000000000000000000000000003b")
 	if got := sdSpeedClass(dir); got == "" {
 		t.Error("expected a speed class from CSD ending in 3b")
+	}
+}
+
+// ---- embedded databases ----
+
+func TestEmbeddedUSBIDsParsed(t *testing.T) {
+	vendors, products := map[string]string{}, map[string]map[string]string{}
+	old := usbVendors
+	oldP := usbProducts
+	usbVendors, usbProducts = vendors, products
+	parseUSBIDs(embeddedUSBIDs())
+	usbVendors, usbProducts = old, oldP
+
+	if vendors["046d"] == "" {
+		t.Fatalf("embedded usb.ids missing vendor 046d, got %d vendors", len(vendors))
+	}
+	if products["046d"] == nil || products["046d"]["c534"] == "" {
+		t.Error("embedded usb.ids missing product 046d:c534")
+	}
+}
+
+func TestEmbeddedOUIParsed(t *testing.T) {
+	table := map[string]string{}
+	parseOUILines(embeddedOUI(), table)
+	if len(table) < 10000 {
+		t.Fatalf("embedded OUI looks truncated: %d entries", len(table))
+	}
+	if table["286FB9"] == "" {
+		t.Error("embedded OUI missing 28:6F:B9")
+	}
+}
+
+// TestOfflineFallbackUsesEmbedded verifies that with no cache and no network
+// the lookups still resolve from the copy baked into the binary.
+func TestOfflineFallbackUsesEmbedded(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	// Point the system paths at nonexistent files so only the embedded copy remains.
+	oldSys := ouiSystemPaths
+	ouiSystemPaths = []string{filepath.Join(t.TempDir(), "nope")}
+	defer func() { ouiSystemPaths = oldSys }()
+
+	table := map[string]string{}
+	if path, ok := ouiLocalPath(); ok {
+		t.Fatalf("expected no local OUI, found %s", path)
+	}
+	parseOUILines(embeddedOUI(), table)
+	if table["286FB9"] == "" {
+		t.Error("offline fallback failed to resolve a MAC vendor")
+	}
+}
+
+// ---- conditional download ----
+
+func TestRefreshDBSkipsWhenNotModified(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+
+	body := "OUI/MA-L  Organization\n00-00-0C   (hex)   Cisco Systems, Inc\n"
+	etag := `"v1"`
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	dst := cachePath("oui.txt")
+	if err := refreshDB(srv.URL, "oui.txt", looksLikeOUIDB); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	if !looksLikeOUIDB(dst) {
+		t.Fatal("downloaded file not recognized as an OUI database")
+	}
+	if got, _ := readValidators(dst); got != etag {
+		t.Fatalf("etag not stored, got %q", got)
+	}
+
+	// Second call must be a conditional request answered with 304.
+	if err := refreshDB(srv.URL, "oui.txt", looksLikeOUIDB); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	if hits != 2 {
+		t.Fatalf("expected 2 server hits, got %d", hits)
+	}
+	data, _ := os.ReadFile(dst)
+	if string(data) != body {
+		t.Error("cached content was clobbered by a 304")
+	}
+}
+
+func TestRefreshDBRejectsHTML(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "<!DOCTYPE html><html><body>captive portal</body></html>")
+	}))
+	defer srv.Close()
+
+	err := refreshDB(srv.URL, "oui.txt", looksLikeOUIDB)
+	if err == nil {
+		t.Fatal("expected an error for an HTML response")
+	}
+	if fileExists(cachePath("oui.txt")) {
+		t.Error("invalid download must not be left in the cache")
+	}
+}
+
+func TestParseOUILineFormats(t *testing.T) {
+	table := map[string]string{}
+	parseOUILine("00-00-0C   (hex)              CISCO SYSTEMS, INC.", table)
+	parseOUILine("286FB9\tNokia Shanghai Bell Co., Ltd.", table)
+	parseOUILine("38:E2:CA\tKatun\tKatun Corporation", table)
+	parseOUILine("# comment", table)
+	if table["00000C"] == "" || table["286FB9"] == "" || table["38E2CA"] == "" {
+		t.Errorf("failed to parse one of the OUI formats: %v", table)
+	}
+	if len(table) != 3 {
+		t.Errorf("expected 3 entries, got %d", len(table))
 	}
 }

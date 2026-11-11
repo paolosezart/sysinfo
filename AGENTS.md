@@ -18,6 +18,21 @@ make test
 go vet ./...
 ```
 
+## Vendor databases
+- `data/usb.ids.gz` and `data/oui.txt.gz` are embedded into the binary
+  (`embed.go`) so vendor lookups work with no network and an empty cache.
+- `--vendor` / `--oui` refresh the cache with a conditional request
+  (`If-None-Match` / `If-Modified-Since`); an unchanged upstream is skipped.
+- Regenerate the embedded databases (compact OUI + usb.ids) with:
+  ```sh
+  curl -sL https://standards-oui.ieee.org/oui/oui.txt |
+    awk -F'[(]hex[)]' '/\(hex\)/{gsub("-","",$1); sub(/^[ \t]+/,"",$2); printf "%s\t%s\n", toupper(substr($1,1,6)), $2}' |
+    gzip -9 > data/oui.txt.gz
+  curl -sL https://raw.githubusercontent.com/gentoo/hwids/master/usb.ids |
+    gzip -9 > data/usb.ids.gz
+  ```
+  Then bump `sysinfo/1.2` in the `User-Agent` if the format changed.
+
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`
   in `i18n.go`. Units are stored language-neutral ("MHz", "Mbps") and localized

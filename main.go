@@ -101,9 +101,9 @@ var (
 	flagEN     = flag.Bool("en", false, L("принудительно английский вывод", "force English output"))
 	flagHelp   = flag.Bool("help", false, L("показать эту справку", "show this help"))
 	flagH      = flag.Bool("h", false, L("показать эту справку", "show this help"))
-	flagVendor = flag.Bool("vendor", false, L("скачать базу USB-вендоров (usb.ids)", "download the USB vendor database (usb.ids)"))
+	flagVendor = flag.Bool("vendor", false, L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)"))
 	flagV      = flag.Bool("v", false, L("то же, что --vendor", "same as --vendor"))
-	flagOUI    = flag.Bool("oui", false, L("скачать базу MAC-вендоров (IEEE OUI)", "download the IEEE OUI MAC vendor database"))
+	flagOUI    = flag.Bool("oui", false, L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database"))
 	flagO      = flag.Bool("o", false, L("то же, что --oui", "same as --oui"))
 	flagInst   = flag.Bool("install", false, L("установить утилиту в /usr/local/bin/sysinfo", "install the tool as /usr/local/bin/sysinfo"))
 	flagI      = flag.Bool("i", false, L("то же, что --install", "same as --install"))
@@ -257,8 +257,8 @@ func printHelp() {
   --ru / --en         ` + L("принудительный язык вывода", "force the output language") + `
   --demo              ` + L("пример вывода для Raspberry Pi 4B", "sample Raspberry Pi 4B report") + `
   --install, -i       ` + L("установить в /usr/local/bin/sysinfo (нужен root)", "install as /usr/local/bin/sysinfo (needs root)") + `
-  --vendor, -v        ` + L("скачать базу USB-вендоров (usb.ids)", "download the USB vendor database (usb.ids)") + `
-  --oui, -o           ` + L("скачать базу MAC-вендоров (IEEE OUI)", "download the IEEE OUI MAC vendor database") + `
+  --vendor, -v        ` + L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)") + `
+  --oui, -o           ` + L("обновить базу MAC-вендоров (IEEE OUI)", "refresh the IEEE OUI MAC vendor database") + `
   --help, -h          ` + L("эта справка", "this help") + `
 
 ` + L("Примеры", "Examples") + `:
