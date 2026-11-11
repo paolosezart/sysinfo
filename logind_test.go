@@ -154,6 +154,17 @@ func TestParseLogindSessions(t *testing.T) {
 	if tty1.LoginTime != "11.11.2026 20:06:12" {
 		t.Errorf("tty1 LoginTime = %q, want 11.11.2026 20:06:12", tty1.LoginTime)
 	}
+	// A graphical login carries its Type and desktop so the report can say
+	// "desktop" instead of "local terminal".
+	if tty1.Type != "x11" {
+		t.Errorf("tty1 Type = %q, want x11", tty1.Type)
+	}
+	if tty1.Detail != "LXDE-pi" {
+		t.Errorf("tty1 Detail = %q, want LXDE-pi", tty1.Detail)
+	}
+	if got := sessionLabel(tty1); got != L("рабочий стол", "desktop") {
+		t.Errorf("tty1 label = %q, want desktop", got)
+	}
 
 	pts0 := byLine["pts/0"]
 	if pts0.ConnType != "ssh" {
@@ -161,6 +172,10 @@ func TestParseLogindSessions(t *testing.T) {
 	}
 	if pts0.Remote != "192.168.100.234" {
 		t.Errorf("pts/0 Remote = %q, want 192.168.100.234", pts0.Remote)
+	}
+	// A plain SSH terminal has no desktop; its Detail is the owning service.
+	if pts0.Detail != "sshd" {
+		t.Errorf("pts0 Detail = %q, want sshd", pts0.Detail)
 	}
 
 	// A session in state "online" is still a logged-in user and must be listed.

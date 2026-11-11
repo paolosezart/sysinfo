@@ -76,15 +76,24 @@ go vet ./...
   JSON), so the text form is parsed. Keep only `Class=user` and
   `State=active|online`; the manager/greeter/lock-screen sessions would otherwise
   show as phantom users.
+- A remote session is decided by `Remote=yes` + `RemoteHost`, not by the
+  `Service=sshd` name, so non-sshd remote paths are not missed. logind `Type`
+  (`x11`/`wayland`/`tty`/`unspecified`) is the only way to tell a graphical
+  desktop login from a plain console; utmp cannot. The desktop name comes from
+  the `Desktop=` property (e.g. `LXDE-pi`), otherwise the owning `Service=`.
+- A session whose `Remote=yes` has no `RemoteHost` is still remote: keep it as
+  SSH with an empty address rather than dropping it.
 - `sftp`/`scp` never appear in `utmp`: they are SSH subsystems that run without
   a pty, so sshd records no login entry for them (OpenSSH `mm_pty_allocate` ->
   `mm_record_login` runs only for interactive PTY sessions). Only the
   interactive SSH login is listed; it cannot be told apart from sftp/scp by
   this data. Do not claim a protocol the data cannot show.
-- The SSH client version is not in utmp. sshd exports `SSH_CLIENT_VERSION` /
-  `SSH_CONNECTION` to the session, so it is only readable from that process's
-  `/proc/<pid>/environ` (root, or same uid). Treat the client field as
-  best-effort and never fail the report when it is empty.
+- There is NO SSH client version/name in the data. OpenSSH exports only
+  `SSH_CLIENT`, `SSH_CONNECTION` and `SSH_TTY` to the session environment; a
+  `SSH_CLIENT_VERSION` variable does not exist (verified against the OpenSSH
+  tree — 0 hits). An earlier revision read it and always got "". Do not
+  reintroduce it. The only real remote datum is the peer address, from
+  `SSH_CONNECTION` (`/proc/<pid>/environ`, root or same uid) or the utmp host.
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

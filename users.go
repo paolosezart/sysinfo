@@ -19,12 +19,13 @@ import (
 // SessionInfo describes a single logged-in user session.
 type SessionInfo struct {
 	User      string `json:"user"`
-	Line      string `json:"line"`             // tty / pts device
-	ConnType  string `json:"connection"`       // local / ssh / sftp / scp
+	Line      string `json:"line,omitempty"`   // tty / pts device
+	ConnType  string `json:"connection"`       // local / ssh
+	Type      string `json:"type,omitempty"`   // tty / x11 / wayland / unspecified
+	Detail    string `json:"detail,omitempty"` // desktop name or session service
 	Remote    string `json:"remote,omitempty"` // client address for remote sessions
 	RemoteDNS string `json:"remote_dns,omitempty"`
 	LoginTime string `json:"login_time"` // preformatted, locale independent
-	Client    string `json:"client,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	PID       int    `json:"pid,omitempty"`
 }
@@ -143,7 +144,10 @@ func sessionsFromPath(path string) []SessionInfo {
 			s.LoginTime = r.loginTime.Format("02.01.2006 15:04:05")
 		}
 		s.ConnType = sessionConnType(r)
-		s.Remote, s.Client = classifySession(r)
+		if s.ConnType == "local" {
+			s.Type = "tty"
+		}
+		s.Remote = classifySession(r)
 		if s.Remote != "" {
 			s.RemoteDNS = reverseDNS(s.Remote)
 		}
@@ -159,31 +163,28 @@ func sessionsFromPath(path string) []SessionInfo {
 	return out
 }
 
-// classifySession returns the client address and, for SSH sessions, the client
-// identification string. The client version is not part of utmp; sshd keeps it
-// in the session's environment (SSH_CLIENT_VERSION), readable only when we run
-// with the same privileges as the login process.
-func classifySession(r utmpRecord) (remote, client string) {
-	client = sshClientFromEnv(r.pid)
-
+// classifySession returns the client address of a utmp session. utmp has no
+// protocol tag and no client identification: the sshd version string is not
+// exported to the session environment (OpenSSH sets only SSH_CLIENT,
+// SSH_CONNECTION and SSH_TTY), so the client field that older versions tried to
+// read never existed. Only the peer address is real, and it comes from
+// SSH_CONNECTION when readable, otherwise from the utmp host field.
+func classifySession(r utmpRecord) (remote string) {
 	// The utmp host field carries the origin for both local (:0) and remote
 	// logins; prefer the explicit SSH_CONNECTION peer when present.
 	host := r.host
 	if h := sshHostFromEnv(r.pid); h != "" {
 		host = h
 	}
-	if host == "" {
-		host = sshHostFromClient(client)
-	}
 	if host == ":0" || host == "localhost" {
 		host = ""
 	}
-	return host, client
+	return host
 }
 
 // sessionConnType maps a utmp record to a connection type. The kernel keeps no
-// protocol tag, so the classification is heuristic: a pts device with a client
-// address is a remote (SSH) login, everything else is local. sftp and scp are
+// protocol tag, so the classification is heuristic: a pts device or a non-local
+// host means a remote (SSH) login, everything else is local. sftp and scp are
 // not separate: both are SSH subsystems that run without a pty, so sshd records
 // no utmp entry for them and they never appear here. Only the interactive SSH
 // login (and its own PTY) is listed, which is why sftp/scp cannot be told apart
@@ -195,53 +196,25 @@ func sessionConnType(r utmpRecord) string {
 	return "local"
 }
 
-// sshClientFromEnv reads the SSH client identification (e.g. "OpenSSH_9.2p1
-// Debian-3") that sshd stores in the login session's environment. Best effort:
-// only readable with root or matching ownership.
-func sshClientFromEnv(pid int32) string {
-	b := procEnviron(pid)
-	if b == nil {
-		return ""
-	}
-	return sshClientFromEnviron(b)
-}
-
-func sshClientFromEnviron(environ []byte) string {
-	for _, kv := range bytes.Split(environ, []byte{0}) {
-		if v, ok := strings.CutPrefix(string(kv), "SSH_CLIENT_VERSION="); ok {
-			return v
-		}
-	}
-	return ""
-}
-
-// sshHostFromClient extracts an address embedded in an "SSH-2.0-<software>"
-// client string, if one is present.
-func sshHostFromClient(client string) string {
-	if !strings.HasPrefix(client, "SSH-") {
-		return ""
-	}
-	f := strings.Fields(client)
-	if len(f) >= 2 {
-		return f[len(f)-1]
-	}
-	return ""
-}
-
 // sshHostFromEnv resolves the peer address from SSH_CONNECTION, which sshd
 // exports to the session ("client_ip client_port server_ip server_port").
 func sshHostFromEnv(pid int32) string {
-	b := procEnviron(pid)
-	if b == nil {
+	return sshPeerFromEnviron(procEnviron(pid))
+}
+
+// sshPeerFromEnviron extracts the client address from an SSH_CONNECTION value
+// inside a NUL-separated environment blob.
+func sshPeerFromEnviron(environ []byte) string {
+	if environ == nil {
 		return ""
 	}
-	for _, kv := range bytes.Split(b, []byte{0}) {
-		v, ok := strings.CutPrefix(string(kv), "SSH_CONNECTION=")
+	for _, kv := range bytes.Split(environ, []byte{0}) {
+		v, ok := bytes.CutPrefix(kv, []byte("SSH_CONNECTION="))
 		if !ok {
 			continue
 		}
-		if f := strings.Fields(v); len(f) > 0 {
-			return f[0]
+		if f := bytes.Fields(v); len(f) > 0 {
+			return string(f[0])
 		}
 	}
 	return ""
@@ -413,8 +386,20 @@ func debugUtmp(w io.Writer) {
 	sessions := collectSessions()
 	fmt.Fprintf(w, "sessions used in report: %d\n", len(sessions))
 	for _, s := range sessions {
-		fmt.Fprintf(w, "    %s [%s] line=%q remote=%q pid=%d\n", s.User, s.ConnType, s.Line, s.Remote, s.PID)
+		detail := ""
+		if s.Detail != "" {
+			detail = " detail=" + strconv.Quote(s.Detail)
+		}
+		fmt.Fprintf(w, "    %s [%s] type=%s line=%q remote=%q%s pid=%d\n",
+			s.User, s.ConnType, orNone(s.Type), s.Line, s.Remote, detail, s.PID)
 	}
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // reverseDNS resolves an address to a host name, bounded by cmdTimeout so a

@@ -21,12 +21,14 @@ type logindSession struct {
 	ID         string
 	User       string
 	TTY        string
+	Display    string
 	Remote     bool
 	RemoteHost string
 	Service    string
 	Type       string
 	Class      string
 	State      string
+	Desktop    string
 	Leader     int
 	Timestamp  string
 }
@@ -70,6 +72,8 @@ func parseLogindBlock(block string) logindSession {
 			s.User = value
 		case "TTY":
 			s.TTY = value
+		case "Display":
+			s.Display = value
 		case "Remote":
 			s.Remote = value == "yes"
 		case "RemoteHost":
@@ -82,6 +86,8 @@ func parseLogindBlock(block string) logindSession {
 			s.Class = value
 		case "State":
 			s.State = value
+		case "Desktop":
+			s.Desktop = value
 		case "Leader":
 			s.Leader, _ = strconv.Atoi(value)
 		case "Timestamp":
@@ -109,6 +115,7 @@ func logindToSession(s logindSession) (SessionInfo, bool) {
 		Line:      s.TTY,
 		SessionID: s.ID,
 		PID:       s.Leader,
+		Type:      s.Type,
 	}
 	if t, ok := parseLogindTimestamp(s.Timestamp); ok {
 		si.LoginTime = t.Format("02.01.2006 15:04:05")
@@ -117,15 +124,25 @@ func logindToSession(s logindSession) (SessionInfo, bool) {
 		si.ConnType = "ssh"
 		si.Remote = s.RemoteHost
 		si.RemoteDNS = reverseDNS(s.RemoteHost)
-	} else if strings.HasPrefix(s.Service, "sshd") {
-		si.ConnType = "ssh"
+		si.Detail = s.Service
 	} else {
 		si.ConnType = "local"
-	}
-	if si.ConnType == "ssh" && si.PID > 0 {
-		si.Client = sshClientFromEnv(int32(si.PID))
+		si.Detail = sessionDesktop(s)
 	}
 	return si, true
+}
+
+// sessionDesktop describes a local session for display: the desktop name for a
+// graphical login, otherwise the service that owns the session (e.g. "lightdm",
+// "login"). Empty for the bare "unspecified" service so nothing noisy is shown.
+func sessionDesktop(s logindSession) string {
+	if s.Desktop != "" {
+		return s.Desktop
+	}
+	if s.Service == "systemd" || s.Service == "unspecified" {
+		return ""
+	}
+	return s.Service
 }
 
 // parseLogindTimestamp reads the "Timestamp=" value, which loginctl prints in a

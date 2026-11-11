@@ -196,37 +196,29 @@ func TestSessionConnType(t *testing.T) {
 
 func TestClassifySession(t *testing.T) {
 	// A pts login with a host in utmp yields that host as the client address.
-	remote, client := classifySession(utmpRecord{line: "pts/0", host: "203.0.113.7", pid: 0})
+	remote := classifySession(utmpRecord{line: "pts/0", host: "203.0.113.7", pid: 0})
 	if remote != "203.0.113.7" {
 		t.Errorf("remote = %q, want 203.0.113.7", remote)
 	}
-	if client != "" {
-		t.Errorf("client = %q, want empty (no environ)", client)
-	}
 
 	// A local X session has no remote host.
-	remote, _ = classifySession(utmpRecord{line: ":0", host: ":0"})
-	if remote != "" {
+	if remote := classifySession(utmpRecord{line: ":0", host: ":0"}); remote != "" {
 		t.Errorf("local remote = %q, want empty", remote)
 	}
 }
 
-func TestSSHClientFromEnviron(t *testing.T) {
-	env := []byte("PATH=/usr/bin\x00SSH_CONNECTION=10.0.0.9 50123 10.0.0.1 22\x00SSH_CLIENT_VERSION=OpenSSH_9.6p1\x00")
-	if got := sshClientFromEnviron(env); got != "OpenSSH_9.6p1" {
-		t.Errorf("client = %q, want OpenSSH_9.6p1", got)
+// SSH_CONNECTION is the only peer address sshd exports; the client version is
+// not available anywhere, so nothing may be invented for it.
+func TestSSHPeerFromEnviron(t *testing.T) {
+	env := []byte("PATH=/usr/bin\x00SSH_CONNECTION=10.0.0.9 50123 10.0.0.1 22\x00SSH_TTY=/dev/pts/0\x00")
+	if got := sshPeerFromEnviron(env); got != "10.0.0.9" {
+		t.Errorf("peer = %q, want 10.0.0.9", got)
 	}
-	if got := sshClientFromEnviron([]byte("PATH=/usr/bin\x00")); got != "" {
-		t.Errorf("client = %q, want empty", got)
+	if got := sshPeerFromEnviron([]byte("PATH=/usr/bin\x00")); got != "" {
+		t.Errorf("peer = %q, want empty", got)
 	}
-}
-
-func TestSSHHostFromClient(t *testing.T) {
-	if got := sshHostFromClient("SSH-2.0-OpenSSH_9.6p1 198.51.100.4"); got != "198.51.100.4" {
-		t.Errorf("host = %q, want 198.51.100.4", got)
-	}
-	if got := sshHostFromClient("OpenSSH_9.6p1"); got != "" {
-		t.Errorf("host = %q, want empty", got)
+	if got := sshPeerFromEnviron(nil); got != "" {
+		t.Errorf("peer(nil) = %q, want empty", got)
 	}
 }
 

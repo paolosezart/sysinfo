@@ -608,19 +608,18 @@ func summarizeFeatures(features []string) string {
 	return strings.Join(found, ", ")
 }
 
-// connTypeLabel renders a session connection type for display.
-func connTypeLabel(t string) string {
-	switch t {
-	case "ssh":
+// sessionLabel renders the session kind for display: SSH, a graphical desktop
+// or a plain local terminal. The distinction between desktop and terminal comes
+// from logind's session Type; utmp can only say "local".
+func sessionLabel(s SessionInfo) string {
+	switch {
+	case s.ConnType == "ssh":
 		return "SSH"
-	case "sftp":
-		return "SFTP"
-	case "scp":
-		return "SCP"
-	case "local":
+	case s.Type == "x11" || s.Type == "wayland":
+		return L("рабочий стол", "desktop")
+	default:
 		return L("локальный терминал", "local terminal")
 	}
-	return t
 }
 
 func (r *renderer) renderUsers(sessions []SessionInfo) {
@@ -631,7 +630,7 @@ func (r *renderer) renderUsers(sessions []SessionInfo) {
 	}
 	for _, s := range sessions {
 		head := r.paint(cBold, s.User)
-		head += "  " + r.paint(cDim, "["+connTypeLabel(s.ConnType)+"]")
+		head += "  " + r.paint(cDim, "["+sessionLabel(s)+"]")
 		if s.Remote != "" {
 			remote := s.Remote
 			if s.RemoteDNS != "" {
@@ -643,8 +642,12 @@ func (r *renderer) renderUsers(sessions []SessionInfo) {
 		if s.LoginTime != "" {
 			r.kvIndent(L("Время входа", "Login time"), s.LoginTime)
 		}
-		if s.Client != "" {
-			r.kvIndent(L("Клиент", "Client"), s.Client)
+		if s.Detail != "" {
+			label := L("Служба", "Service")
+			if s.Type == "x11" || s.Type == "wayland" {
+				label = L("Рабочий стол", "Desktop")
+			}
+			r.kvIndent(label, s.Detail)
 		}
 		if s.Line != "" {
 			r.kvIndent(L("Терминал", "Terminal"), s.Line)
