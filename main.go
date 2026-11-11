@@ -77,6 +77,7 @@ func main() {
 			Sensors:   collectSensors(sys),
 			Display:   collectDisplayInfo(),
 			USB:       collectUSBDevices(),
+			Sessions:  collectSessions(),
 			Locale:    collectLocale(),
 			Generated: time.Now(),
 		}
@@ -123,6 +124,8 @@ var (
 	flagD       = flag.Bool("d", false, L("то же, что --display", "same as --display"))
 	flagUSB     = flag.Bool("usb", false, L("только блок USB", "only the USB block"))
 	flagU       = flag.Bool("u", false, L("то же, что --usb", "same as --usb"))
+	flagUsers   = flag.Bool("users", false, L("только блок ПОЛЬЗОВАТЕЛИ", "only the USERS block"))
+	flagSess    = flag.Bool("sessions", false, L("то же, что --users", "same as --users"))
 )
 
 func parseFlags() options {
@@ -153,6 +156,7 @@ func parseFlags() options {
 	add("sensors", flagSensors)
 	add("display", flagDisplay, flagD)
 	add("usb", flagUSB, flagU)
+	add("users", flagUsers, flagSess)
 
 	if *section != "" {
 		// Accept the legacy names, mapping the old "memory"/"display" too.
@@ -175,16 +179,17 @@ func parseFlags() options {
 
 // Report is the complete machine-readable snapshot.
 type Report struct {
-	System    SystemInfo   `json:"system"`
-	CPU       CPUInfo      `json:"cpu"`
-	Memory    MemoryInfo   `json:"memory"`
-	Storage   []Filesystem `json:"storage"`
-	Network   NetworkInfo  `json:"network"`
-	Sensors   SensorInfo   `json:"sensors"`
-	Display   DisplayInfo  `json:"display"`
-	USB       []USBDevice  `json:"usb"`
-	Locale    LocaleInfo   `json:"locale"`
-	Generated time.Time    `json:"generated"`
+	System    SystemInfo    `json:"system"`
+	CPU       CPUInfo       `json:"cpu"`
+	Memory    MemoryInfo    `json:"memory"`
+	Storage   []Filesystem  `json:"storage"`
+	Network   NetworkInfo   `json:"network"`
+	Sensors   SensorInfo    `json:"sensors"`
+	Display   DisplayInfo   `json:"display"`
+	USB       []USBDevice   `json:"usb"`
+	Sessions  []SessionInfo `json:"sessions"`
+	Locale    LocaleInfo    `json:"locale"`
+	Generated time.Time     `json:"generated"`
 }
 
 // installSelf copies the running binary to /usr/local/bin/sysinfo.
@@ -250,6 +255,7 @@ func printHelp() {
   --sensors           ` + L("блок ДАТЧИКИ", "SENSORS block") + `
   --display, -d       ` + L("блок ДИСПЛЕЙ", "DISPLAY block") + `
   --usb, -u           ` + L("блок USB", "USB block") + `
+  --users             ` + L("блок ПОЛЬЗОВАТЕЛИ (подключённые сессии)", "USERS block (logged-in sessions)") + `
 
 ` + L("Прочее", "Other") + `:
   --json              ` + L("вывод в формате JSON", "print the report as JSON") + `

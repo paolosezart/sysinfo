@@ -83,6 +83,9 @@ func (r *renderer) render(rep Report, sections map[string]bool) {
 	if want("usb") {
 		r.renderUSB(rep.USB)
 	}
+	if want("users") {
+		r.renderUsers(rep.Sessions)
+	}
 	fmt.Println()
 }
 
@@ -603,4 +606,62 @@ func summarizeFeatures(features []string) string {
 		return fmt.Sprintf(L("%d флагов", "%d features"), len(features))
 	}
 	return strings.Join(found, ", ")
+}
+
+// connTypeLabel renders a session connection type for display.
+func connTypeLabel(t string) string {
+	switch t {
+	case "ssh":
+		return "SSH"
+	case "sftp":
+		return "SFTP"
+	case "scp":
+		return "SCP"
+	case "local":
+		return L("локальный терминал", "local terminal")
+	}
+	return t
+}
+
+func (r *renderer) renderUsers(sessions []SessionInfo) {
+	r.header(L("ПОЛЬЗОВАТЕЛИ", "USERS"))
+	if len(sessions) == 0 {
+		fmt.Println("  " + r.paint(cDim, L("нет активных сессий", "no active sessions")))
+		return
+	}
+	for _, s := range sessions {
+		head := r.paint(cBold, s.User)
+		head += "  " + r.paint(cDim, "["+connTypeLabel(s.ConnType)+"]")
+		if s.Remote != "" {
+			remote := s.Remote
+			if s.RemoteDNS != "" {
+				remote += " (" + s.RemoteDNS + ")"
+			}
+			head += "  " + r.paint(cGreen, remote)
+		}
+		fmt.Printf("  %s\n", head)
+		if s.LoginTime != "" {
+			r.kvIndent(L("Время входа", "Login time"), s.LoginTime)
+		}
+		if s.Client != "" {
+			r.kvIndent(L("Клиент", "Client"), s.Client)
+		}
+		if s.Line != "" {
+			r.kvIndent(L("Терминал", "Terminal"), s.Line)
+		}
+		meta := ""
+		if s.SessionID != "" {
+			meta = s.SessionID
+		}
+		if s.PID > 0 {
+			if meta != "" {
+				meta += ", "
+			}
+			meta += fmt.Sprintf("PID %d", s.PID)
+		}
+		if meta != "" {
+			r.kvIndent(L("Сессия", "Session"), meta)
+		}
+		fmt.Println()
+	}
 }

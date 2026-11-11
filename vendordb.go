@@ -397,7 +397,7 @@ func downloadTo(url, dst, etag, lastMod string) (dlStatus, error) {
 	if err != nil {
 		return dlUpdated, err
 	}
-	req.Header.Set("User-Agent", "sysinfo/1.2 (+https://github.com/paolosezart/sysinfo)")
+	req.Header.Set("User-Agent", "sysinfo/1.3 (+https://github.com/paolosezart/sysinfo)")
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}

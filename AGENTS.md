@@ -51,6 +51,14 @@ go vet ./...
   former should skip the LAN-port/cable/speed lines.
 - `operstate` can be "unknown" or missing (common for veth); fall back to
   carrier/address presence before calling a link "down".
+- Logged-in sessions come from `utmp` (`/run/utmp`), a fixed 384-byte record
+  layout (`ut_type`@0, `ut_pid`@4, `ut_line`@8, `ut_user`@44, `ut_host`@76,
+  `ut_session`@336, `ut_tv`@340, little-endian on the supported platforms).
+  Filter `ut_type == USER_PROCESS` (7).
+- The SSH client version is not in utmp. sshd exports `SSH_CLIENT_VERSION` /
+  `SSH_CONNECTION` to the session, so it is only readable from that process's
+  `/proc/<pid>/environ` (root, or same uid). Treat the client field as
+  best-effort and never fail the report when it is empty.
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

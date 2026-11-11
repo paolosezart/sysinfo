@@ -142,6 +142,24 @@ func demoReport() Report {
 			{Name: "1-1", Vendor: "Terminus Technology Inc.", Product: "Hub", ID: "1A40:0101",
 				Kind: usbKindFromClasses([]int{9}, nil), Driver: "hub", Speed: formatLinkSpeed(480)},
 		},
+		Sessions: []SessionInfo{
+			{
+				User: "raspi", Line: "tty1", ConnType: "local",
+				LoginTime: time.Now().Add(-12 * time.Hour).Format("02.01.2006 15:04:05"),
+				SessionID: "1", PID: 812,
+			},
+			{
+				User: "raspi", Line: "pts/0", ConnType: "ssh", Remote: "192.168.100.42",
+				RemoteDNS: "desktop.lan",
+				LoginTime: time.Now().Add(-3 * time.Hour).Format("02.01.2006 15:04:05"),
+				Client:    "OpenSSH_9.6p1 Ubuntu-3ubuntu13", SessionID: "3", PID: 1842,
+			},
+			{
+				User: "admin", Line: "pts/1", ConnType: "ssh", Remote: "10.8.0.5",
+				LoginTime: time.Now().Add(-25 * time.Minute).Format("02.01.2006 15:04:05"),
+				Client:    "PuTTY_Release_0.80", SessionID: "5", PID: 2451,
+			},
+		},
 		Generated: time.Now(),
 	}
 }
