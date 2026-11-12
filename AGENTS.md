@@ -127,6 +127,27 @@ go vet ./...
   (`sftp`, `scp`, `rsync`, `ssh -N`); sshd shows it as `user@notty`. It has no
   utmp entry, only a logind session. Label it "SSH without terminal" — the data
   cannot say which protocol it is.
+- `config.txt` lives at `/boot/firmware/config.txt` on Raspberry Pi OS Bookworm
+  and later, and at `/boot/config.txt` on older images; check both, in that
+  order. The file is plain `key=value`, but the `include` directive is
+  space-separated ("include extra.txt") and there are `[filter]` sections.
+  Resolve model filters against the board tags (`boardConfigTags`); keep settings
+  under filters we cannot evaluate (EDID/HDMI/gpio/board-type) rather than
+  dropping them. `#` starts a comment anywhere on a line, not just at column 0.
+- RAM type/speed is not in sysfs on ARM. Raspberry Pi RAM is soldered, so the
+  board model fixes it: the `sdram_freq` default column in the config.txt docs
+  gives the data rate (Pi 4 = 3200, Pi 5 = 4267), and the bus is 32-bit for
+  Pi 1-4 and 64-bit for Pi 5. On x86 read SMBIOS type 17 from
+  `/sys/firmware/dmi/tables/DMI` (type@0x12, configured speed@0x20, bus
+  width@0x0A); the tables are often root-only, so a normal user just gets no
+  value. Peak bandwidth = rate(MT/s) * bus bits / 8.
+- The I2C RTC chip cannot be seen through sysfs once a driver binds the address,
+  so probe `/dev/i2c-*` directly with ioctl `I2C_RDWR` (0x0707) using a
+  zero-length write (START + address + STOP); a NAK from a missing chip is
+  ENXIO/EREMOTEIO. Common addresses: 0x68 (DS1307/DS3231, the ZS-042 module),
+  0x51 (PCF8563), 0x6f (MCP7940x). Reading `/dev/i2c-*` usually needs the `i2c`
+  group. `/sys/class/rtc/rtc0/hctosys` is the key status bit: it says whether the
+  system clock was set from the RTC at boot (the thing users actually care about).
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

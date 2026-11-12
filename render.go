@@ -86,7 +86,82 @@ func (r *renderer) render(rep Report, sections map[string]bool) {
 	if want("users") {
 		r.renderUsers(rep.Sessions)
 	}
+	if want("overclock") && rep.Overclock != nil {
+		r.renderOverclock(rep.Overclock, rep.System.BoardModel)
+	}
+	if want("rtc") && rep.RTC != nil {
+		r.renderRTC(*rep.RTC)
+	}
 	fmt.Println()
+}
+
+// renderOverclock shows the CPU/GPU/SDRAM settings from config.txt alongside the
+// values the firmware reports as active.
+func (r *renderer) renderOverclock(oc *OverclockInfo, model string) {
+	r.header(L("ОВЕРКЛОК / НАПРЯЖЕНИЕ", "OVERCLOCK / VOLTAGE"))
+	if oc.ConfigPath != "" {
+		r.kv(L("Источник", "Source"), oc.ConfigPath)
+	}
+
+	freqLine := func(configured, live int) string {
+		switch {
+		case configured > 0 && live > 0 && configured != live:
+			return fmt.Sprintf("%d %s (%s %d)", configured, L("МГц", "MHz"),
+				L("активно", "active"), live)
+		case configured > 0:
+			return fmt.Sprintf("%d %s", configured, L("МГц", "MHz"))
+		case live > 0:
+			return fmt.Sprintf("%d %s", live, L("МГц", "MHz"))
+		}
+		return ""
+	}
+	r.kv(L("CPU (arm_freq)", "CPU (arm_freq)"), freqLine(oc.ARMfreqMHz, oc.LiveARMfreqMHz))
+	r.kv(L("GPU (gpu_freq)", "GPU (gpu_freq)"), freqLine(oc.GPUfreqMHz, 0))
+	r.kv(L("Ядро GPU (core_freq)", "GPU core (core_freq)"), freqLine(oc.CorefreqMHz, oc.LiveCorefreqMHz))
+	r.kv(L("Память (sdram_freq)", "Memory (sdram_freq)"), freqLine(oc.SDRAMfreqMHz, oc.LiveSDRAMfreqMHz))
+	r.kv(L("Напряжение (over_voltage)", "Voltage (over_voltage)"), overclockVoltageLine(oc, model))
+	if oc.ForceTurbo {
+		r.kv(L("Турбо-режим (force_turbo)", "Turbo mode (force_turbo)"), L("включён", "enabled"))
+	}
+	if oc.ArmBoost {
+		r.kv(L("Ускорение (arm_boost)", "Boost (arm_boost)"), L("включено", "enabled"))
+	}
+	if oc.TempLimitC > 0 {
+		r.kv(L("Температурный предел", "Temperature limit"), fmt.Sprintf("%d °C", oc.TempLimitC))
+	}
+	if !oc.HasLive && oc.ARMfreqMHz == 0 && oc.GPUfreqMHz == 0 && oc.CorefreqMHz == 0 && oc.SDRAMfreqMHz == 0 && !oc.OverVoltageSet {
+		r.kv(L("Разгон", "Overclock"), r.paint(cDim, L("параметры не заданы (заводские частоты)", "no parameters set (factory clocks)")))
+	}
+}
+
+// renderRTC shows the hardware clock and, crucially, whether the system uses it.
+func (r *renderer) renderRTC(rtc RTCInfo) {
+	r.header(L("RTC (часы реального времени)", "RTC (real-time clock)"))
+	if rtc.Name != "" {
+		r.kv(L("Устройство", "Device"), fmt.Sprintf("%s (%s)", rtc.Device, rtc.Name))
+	} else if rtc.Device != "" {
+		r.kv(L("Устройство", "Device"), rtc.Device)
+	}
+	if rtc.Date != "" {
+		r.kv(L("Время RTC", "RTC time"), strings.TrimSpace(rtc.Date+" "+rtc.Time))
+	}
+	if rtc.I2CFound {
+		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), rtc.chipLine())
+	} else if rtc.ScanError != "" {
+		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), r.paint(cDim, rtc.ScanError))
+	} else if rtc.Scanned {
+		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), r.paint(cDim, L("не обнаружена", "not detected")))
+	}
+	if rtc.OverlayEnabled {
+		r.kv(L("dtoverlay в config.txt", "dtoverlay in config.txt"), rtc.OverlayParams)
+	}
+	if status := rtc.statusLine(); status != "" {
+		color := cYellow
+		if rtc.Hctosys {
+			color = cGreen
+		}
+		r.kv(L("Синхронизация", "Synchronisation"), r.paint(color, status))
+	}
 }
 
 func (r *renderer) renderSystem(s SystemInfo, loc LocaleInfo) {
@@ -150,11 +225,27 @@ func (r *renderer) renderCPU(c CPUInfo) {
 }
 
 func (r *renderer) renderMemory(m MemoryInfo) {
-	r.header(L("ПАМЯТЬ", "MEMORY"))
+	r.header(L("ОЗУ", "RAM"))
 	r.kv(L("Всего ОЗУ", "Total RAM"), humanBytes(m.TotalKB*1024))
 	r.kv(L("Использовано", "Used"), fmt.Sprintf("%s (%.0f%%)", humanBytes(m.UsedKB*1024), percent(m.UsedKB, m.TotalKB)))
 	r.kv(L("Свободно", "Available"), humanBytes(m.AvailableKB*1024))
 	r.kv(L("Буферы/кэш", "Buffers/cache"), fmt.Sprintf("%s / %s", humanBytes(m.BuffersKB*1024), humanBytes(m.CachedKB*1024)))
+
+	// RAM type and speed come from SMBIOS or the board model, so note the source.
+	if m.RAMType != "" {
+		typ := m.RAMType
+		if m.RAMSource != "" {
+			typ = fmt.Sprintf("%s (%s)", typ, m.RAMSource)
+		}
+		r.kv(L("Тип памяти", "Memory type"), typ)
+	}
+	if m.RAMSpeedMTs > 0 {
+		r.kv(L("Скорость", "Speed"), fmt.Sprintf("%d MT/s", m.RAMSpeedMTs))
+	}
+	if m.RAMPeakGBs > 0 {
+		r.kv(L("Пропускная способность (пик)", "Bandwidth (peak)"),
+			fmt.Sprintf("%.1f %s", m.RAMPeakGBs, L("ГБ/с", "GB/s")))
+	}
 
 	// RAM frequency is only exposed on some SoCs; show it when present.
 	if m.RAMCurMHz > 0 {

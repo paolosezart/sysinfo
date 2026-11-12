@@ -88,10 +88,11 @@ func main() {
 		if opts.sshClient {
 			attachSSHClientVersions(sessions)
 		}
+		ct := collectConfigTxt(sys.BoardModel)
 		report = Report{
 			System:    sys,
 			CPU:       collectCPUInfo(),
-			Memory:    collectMemoryInfo(),
+			Memory:    collectMemoryInfoFor(sys.BoardModel),
 			Storage:   collectFilesystems(),
 			Network:   collectNetworkInfo(),
 			Sensors:   collectSensors(sys),
@@ -99,6 +100,8 @@ func main() {
 			USB:       collectUSBDevices(),
 			Sessions:  sessions,
 			Locale:    collectLocale(),
+			Overclock: collectOverclock(ct, sys.BoardModel),
+			RTC:       rtcReport(ct),
 			Generated: time.Now(),
 		}
 	}
@@ -150,6 +153,9 @@ var (
 	flagDbgUtmp = flag.Bool("debug-utmp", false, L("диагностика чтения utmp", "diagnose utmp reading"))
 	flagSSHCli  = flag.Bool("ssh-client", false, L("читать версии SSH-клиентов из системного журнала (нужен LogLevel DEBUG)", "read SSH client versions from the system log (needs LogLevel DEBUG)"))
 	flagTime    = flag.Bool("time", false, L("сверить часы с интернет-временем (NTP/HTTP)", "check the clock against internet time (NTP/HTTP)"))
+	flagOverclk = flag.Bool("overclock", false, L("только блок ОВЕРКЛОК / НАПРЯЖЕНИЕ", "only the OVERCLOCK / VOLTAGE block"))
+	flagOC      = flag.Bool("oc", false, L("то же, что --overclock", "same as --overclock"))
+	flagRTC     = flag.Bool("rtc", false, L("только блок RTC (часы реального времени)", "only the RTC (real-time clock) block"))
 )
 
 func parseFlags() options {
@@ -181,6 +187,8 @@ func parseFlags() options {
 	add("display", flagDisplay, flagD)
 	add("usb", flagUSB, flagU)
 	add("users", flagUsers, flagSess)
+	add("overclock", flagOverclk, flagOC)
+	add("rtc", flagRTC)
 
 	if *section != "" {
 		// Accept the legacy names, mapping the old "memory"/"display" too.
@@ -205,17 +213,19 @@ func parseFlags() options {
 
 // Report is the complete machine-readable snapshot.
 type Report struct {
-	System    SystemInfo    `json:"system"`
-	CPU       CPUInfo       `json:"cpu"`
-	Memory    MemoryInfo    `json:"memory"`
-	Storage   []Filesystem  `json:"storage"`
-	Network   NetworkInfo   `json:"network"`
-	Sensors   SensorInfo    `json:"sensors"`
-	Display   DisplayInfo   `json:"display"`
-	USB       []USBDevice   `json:"usb"`
-	Sessions  []SessionInfo `json:"sessions"`
-	Locale    LocaleInfo    `json:"locale"`
-	Generated time.Time     `json:"generated"`
+	System    SystemInfo     `json:"system"`
+	CPU       CPUInfo        `json:"cpu"`
+	Memory    MemoryInfo     `json:"memory"`
+	Storage   []Filesystem   `json:"storage"`
+	Network   NetworkInfo    `json:"network"`
+	Sensors   SensorInfo     `json:"sensors"`
+	Display   DisplayInfo    `json:"display"`
+	USB       []USBDevice    `json:"usb"`
+	Sessions  []SessionInfo  `json:"sessions"`
+	Locale    LocaleInfo     `json:"locale"`
+	Overclock *OverclockInfo `json:"overclock,omitempty"`
+	RTC       *RTCInfo       `json:"rtc,omitempty"`
+	Generated time.Time      `json:"generated"`
 }
 
 // installSelf copies the running binary to /usr/local/bin/sysinfo.
@@ -297,13 +307,15 @@ func printHelp() {
 ` + L("Секции (можно комбинировать)", "Sections (combinable)") + `:
   --system, -sys      ` + L("блок СИСТЕМА", "SYSTEM block") + `
   --cpu, -c           ` + L("блок ПРОЦЕССОР", "CPU block") + `
-  --ram, -r           ` + L("блок ПАМЯТЬ (включая swap и ZRAM)", "MEMORY block (incl. swap and ZRAM)") + `
+  --ram, -r           ` + L("блок ОЗУ (включая swap и ZRAM)", "RAM block (incl. swap and ZRAM)") + `
   --storage, -s       ` + L("блок НАКОПИТЕЛИ", "STORAGE block") + `
   --network, -n       ` + L("блок СЕТЬ", "NETWORK block") + `
   --sensors           ` + L("блок ДАТЧИКИ", "SENSORS block") + `
   --display, -d       ` + L("блок ДИСПЛЕЙ", "DISPLAY block") + `
   --usb, -u           ` + L("блок USB", "USB block") + `
   --users             ` + L("блок ПОЛЬЗОВАТЕЛИ (подключённые сессии)", "USERS block (logged-in sessions)") + `
+  --overclock, --oc   ` + L("блок ОВЕРКЛОК / НАПРЯЖЕНИЕ (из config.txt)", "OVERCLOCK / VOLTAGE block (from config.txt)") + `
+  --rtc               ` + L("блок RTC (часы реального времени)", "RTC (real-time clock) block") + `
 
 ` + L("Прочее", "Other") + `:
   --json              ` + L("вывод в формате JSON", "print the report as JSON") + `

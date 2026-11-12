@@ -125,6 +125,11 @@ func parseUint(s string) uint64 {
 	return v
 }
 
+// parseInt parses a signed integer, returning an error on failure.
+func parseInt(s string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(s))
+}
+
 // parseFloat parses a float, returning 0 on error.
 func parseFloat(s string) float64 {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)

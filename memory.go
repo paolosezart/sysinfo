@@ -29,6 +29,14 @@ type MemoryInfo struct {
 	RAMCurMHz float64
 	RAMMinMHz float64
 	RAMMaxMHz float64
+
+	// RAMType/Speed/Bus come from SMBIOS or the board model; empty/zero when the
+	// platform does not reveal them.
+	RAMType     string
+	RAMSpeedMTs int
+	RAMBusBits  int
+	RAMPeakGBs  float64
+	RAMSource   string // where the values came from: SMBIOS or the board model
 }
 
 // SwapDevice is one entry from /proc/swaps.
@@ -54,6 +62,12 @@ type ZramDevice struct {
 }
 
 func collectMemoryInfo() MemoryInfo {
+	return collectMemoryInfoFor("")
+}
+
+// collectMemoryInfoFor is collectMemoryInfo with the board model, which is only
+// needed to resolve the RAM type and speed when the platform does not report it.
+func collectMemoryInfoFor(model string) MemoryInfo {
 	mi := MemoryInfo{}
 	vals := readMemInfo("/proc/meminfo")
 	mi.TotalKB = vals["MemTotal"]
@@ -75,6 +89,13 @@ func collectMemoryInfo() MemoryInfo {
 	mi.Zram = collectZram()
 	mi.SwapDevices = collectSwapDevices()
 	mi.RAMCurMHz, mi.RAMMinMHz, mi.RAMMaxMHz = ramFrequency()
+	if spec, source, ok := ramInfo(model); ok {
+		mi.RAMType = spec.Type
+		mi.RAMSpeedMTs = spec.SpeedMTs
+		mi.RAMBusBits = spec.BusBits
+		mi.RAMPeakGBs = spec.peakGBs()
+		mi.RAMSource = source
+	}
 	return mi
 }
 
