@@ -27,6 +27,18 @@ func ramBandwidthMbit(rateMTs, busBits int) float64 {
 	return float64(rateMTs) * float64(busBits)
 }
 
+// ramClockMHz returns the real (physical) clock for a DDR data rate. Every
+// LPDDR/DDR generation transfers on both edges, so the clock is half the rate.
+func ramClockMHz(rateMTs int) float64 {
+	return float64(rateMTs) / 2
+}
+
+// formatRateClock renders a DDR data rate as "3200 MT/s (1600 MHz)", i.e. the
+// effective rate followed by the real bus clock.
+func formatRateClock(rateMTs int) string {
+	return fmt.Sprintf("%d MT/s (%.0f %s)", rateMTs, ramClockMHz(rateMTs), L("МГц", "MHz"))
+}
+
 // formatBandwidth renders a bandwidth given in megabits per second, switching to
 // gigabits per second once it is large enough.
 func formatBandwidth(mbit float64) string {
@@ -40,6 +52,69 @@ func formatBandwidth(mbit float64) string {
 	}
 }
 
+// formatBandwidthBytes renders a bandwidth given in megabits per second as bytes
+// per second, switching to gigabytes once it is large enough.
+func formatBandwidthBytes(mbit float64) string {
+	if mbit <= 0 {
+		return ""
+	}
+	mb := mbit / 8
+	if mb >= 1000 {
+		return fmt.Sprintf("%.1f %s", mb/1000, L("ГБ/с", "GB/s"))
+	}
+	return fmt.Sprintf("%.0f %s", mb, L("МБ/с", "MB/s"))
+}
+
+// numStr formats a float, dropping the trailing ".0" for whole numbers.
+func numStr(v float64) string {
+	s := fmt.Sprintf("%.1f", v)
+	if strings.HasSuffix(s, ".0") {
+		s = s[:len(s)-2]
+	}
+	return s
+}
+
+// pairStr renders "base" or "base / oc" when oc is greater than zero.
+func pairStr(base, oc float64) string {
+	if oc > 0 {
+		return numStr(base) + " / " + numStr(oc)
+	}
+	return numStr(base)
+}
+
+// formatRAMLine builds the single "RAM type and speed" value: the effective rate
+// with the real clock, the peak bandwidth in bits with bytes in parentheses, and
+// the bus width, with the memory type in parentheses. When config.txt sets
+// sdram_freq (an overclock) the factory figures stay and the overclocked ones
+// follow after a slash, so base / OC is always visible.
+func formatRAMLine(spec ramSpec, ocMTs int) string {
+	if spec.Type == "" && spec.SpeedMTs == 0 {
+		return ""
+	}
+	var parts []string
+	if spec.SpeedMTs > 0 {
+		rate := pairStr(float64(spec.SpeedMTs), float64(ocMTs)) + " MT/s"
+		clock := pairStr(ramClockMHz(spec.SpeedMTs), ramClockMHz(ocMTs))
+		parts = append(parts, fmt.Sprintf("%s (%s %s)", rate, clock, L("МГц", "MHz")))
+	}
+	if bw := ramBandwidthMbit(spec.SpeedMTs, spec.BusBits); bw > 0 {
+		bits, bytes := formatBandwidth(bw), formatBandwidthBytes(bw)
+		if obw := ramBandwidthMbit(ocMTs, spec.BusBits); obw > 0 {
+			bits += " / " + formatBandwidth(obw)
+			bytes += " / " + formatBandwidthBytes(obw)
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", bits, bytes))
+	}
+	if spec.BusBits > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d %s", L("шина", "bus"), spec.BusBits, L("бит", "bit")))
+	}
+	line := strings.Join(parts, ", ")
+	if spec.Type != "" {
+		line = strings.TrimSpace(line + " (" + spec.Type + ")")
+	}
+	return line
+}
+
 // knownRAM returns the RAM specification for a recognised board model. Raspberry
 // Pi boards have soldered RAM with a fixed type and rate, so the model is enough
 // to name them. The rates follow the default sdram_freq column of the Raspberry
@@ -49,7 +124,7 @@ func knownRAM(model string) (ramSpec, bool) {
 	switch {
 	case strings.Contains(m, "raspberry pi 5"), strings.Contains(m, "raspberry pi 500"),
 		strings.Contains(m, "compute module 5"):
-		return ramSpec{"LPDDR4X", 4267, 64}, true
+		return ramSpec{"LPDDR4X", 4267, 32}, true
 	case strings.Contains(m, "raspberry pi 4"), strings.Contains(m, "raspberry pi 400"),
 		strings.Contains(m, "compute module 4"):
 		return ramSpec{"LPDDR4", 3200, 32}, true
@@ -57,6 +132,10 @@ func knownRAM(model string) (ramSpec, bool) {
 	// the Pi 3B+ as "Model B Plus", not "B+".
 	case strings.Contains(m, "raspberry pi 3 model b plus"), strings.Contains(m, "raspberry pi 3b+"),
 		strings.Contains(m, "raspberry pi 3 model a plus"), strings.Contains(m, "raspberry pi 3a+"):
+		// The config.txt default table lists sdram_freq=500 (clock) for these
+		// boards, i.e. an effective LPDDR2-1000 rate. The product page instead
+		// states 900 MHz; the two official pages disagree, so keep 1000 to stay
+		// consistent with the sdram_freq option we actually parse.
 		return ramSpec{"LPDDR2", 1000, 32}, true
 	case strings.Contains(m, "raspberry pi 3"), strings.Contains(m, "compute module 3"):
 		return ramSpec{"LPDDR2", 900, 32}, true

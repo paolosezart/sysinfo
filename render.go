@@ -231,21 +231,10 @@ func (r *renderer) renderMemory(m MemoryInfo) {
 	r.kv(L("Свободно", "Available"), humanBytes(m.AvailableKB*1024))
 	r.kv(L("Буферы/кэш", "Buffers/cache"), fmt.Sprintf("%s / %s", humanBytes(m.BuffersKB*1024), humanBytes(m.CachedKB*1024)))
 
-	// RAM type and speed: one line, with the type in parentheses and the
-	// overclocked rate (if config.txt sets sdram_freq) after a slash.
-	if m.RAMType != "" || m.RAMSpeedMTs > 0 {
-		val := formatBandwidth(ramBandwidthMbit(m.RAMSpeedMTs, m.RAMBusBits))
-		if oc := formatBandwidth(ramBandwidthMbit(m.RAMOCSpeedMTs, m.RAMBusBits)); oc != "" {
-			if val == "" {
-				val = oc
-			} else {
-				val += " / " + oc
-			}
-		}
-		if m.RAMType != "" {
-			val = strings.TrimSpace(val + " (" + m.RAMType + ")")
-		}
-		r.kv(L("Тип и скорость ОЗУ", "RAM type and speed"), val)
+	// RAM type and speed on one line: effective rate with the real clock, peak
+	// bandwidth in bits and bytes, type in parentheses; an overclock follows.
+	if spec := (ramSpec{Type: m.RAMType, SpeedMTs: m.RAMSpeedMTs, BusBits: m.RAMBusBits}); spec.Type != "" || spec.SpeedMTs > 0 {
+		r.kv(L("Тип и скорость ОЗУ", "RAM type and speed"), formatRAMLine(spec, m.RAMOCSpeedMTs))
 	}
 
 	// RAM frequency is only exposed on some SoCs; show it when present.

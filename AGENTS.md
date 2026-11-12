@@ -137,10 +137,13 @@ go vet ./...
 - RAM type/speed is not in sysfs on ARM. Raspberry Pi RAM is soldered, so the
   board model fixes it: the `sdram_freq` default column in the config.txt docs
   gives the data rate (Pi 4 = 3200, Pi 5 = 4267), and the bus is 32-bit for
-  Pi 1-4 and 64-bit for Pi 5. On x86 read SMBIOS type 17 from
+  every Pi, including the Pi 5 (the BCM2712 doc states a 32-bit LPDDR4X
+  interface at "up to 17 GB/s", which matches 4267 x 32 = 136.5 Gbit/s).
+  On x86 read SMBIOS type 17 from
   `/sys/firmware/dmi/tables/DMI` (type@0x12, configured speed@0x20, bus
   width@0x0A); the tables are often root-only, so a normal user just gets no
-  value. Speed is shown as peak bandwidth in bits (rate * bus bits); a
+  value. The line shows the effective rate with the real clock (rate / 2), the
+  peak bandwidth in bits with bytes in parentheses, and the bus width; a
   `sdram_freq` in config.txt is shown as "base / oc" so the factory spec is
   never lost.
 - The I2C RTC chip cannot be seen through sysfs once a driver binds the address,

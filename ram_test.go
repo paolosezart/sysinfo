@@ -14,7 +14,7 @@ func TestKnownRAM(t *testing.T) {
 	}{
 		{"Raspberry Pi 4 Model B Rev 1.4", "LPDDR4", 3200, 32},
 		{"Raspberry Pi 400 Rev 1.0", "LPDDR4", 3200, 32},
-		{"Raspberry Pi 5 Model B Rev 1.0", "LPDDR4X", 4267, 64},
+		{"Raspberry Pi 5 Model B Rev 1.0", "LPDDR4X", 4267, 32},
 		{"Raspberry Pi 3 Model B Plus Rev 1.3", "LPDDR2", 1000, 32},
 		{"Raspberry Pi 3 Model B Rev 1.2", "LPDDR2", 900, 32},
 		{"Raspberry Pi Zero W Rev 1.1", "LPDDR2", 900, 32},
@@ -40,8 +40,8 @@ func TestRamBandwidthMbit(t *testing.T) {
 		rate, bus int
 		want      float64
 	}{
-		{3200, 32, 102400}, // Pi 4: 12.8 GB/s = 102.4 Gbit/s
-		{4267, 64, 273088}, // Pi 5
+		{3200, 32, 102400}, // Pi 4: 102.4 Gbit/s = 12.8 GB/s
+		{4267, 32, 136544}, // Pi 5: 136.5 Gbit/s = 17.07 GB/s (docs: "up to 17 GB/s")
 		{900, 32, 28800},
 		{2666, 64, 170624},
 	}
@@ -52,6 +52,40 @@ func TestRamBandwidthMbit(t *testing.T) {
 	}
 	if got := ramBandwidthMbit(0, 32); got != 0 {
 		t.Errorf("ramBandwidthMbit with no rate = %v, want 0", got)
+	}
+}
+
+func TestRamClockMHz(t *testing.T) {
+	if got := ramClockMHz(3200); got != 1600 {
+		t.Errorf("ramClockMHz(3200) = %v, want 1600", got)
+	}
+	if got := ramClockMHz(4267); got != 2133.5 {
+		t.Errorf("ramClockMHz(4267) = %v, want 2133.5", got)
+	}
+}
+
+func TestFormatRAMLine(t *testing.T) {
+	old := langCode
+	langCode = "en"
+	defer func() { langCode = old }()
+
+	// Pi 4B: LPDDR4-3200, 32-bit bus -> 102.4 Gbit/s = 12.8 GB/s.
+	got := formatRAMLine(ramSpec{"LPDDR4", 3200, 32}, 0)
+	want := "3200 MT/s (1600 MHz), 102.4 Gbit/s (12.8 GB/s), bus 32 bit (LPDDR4)"
+	if got != want {
+		t.Errorf("formatRAMLine Pi4 = %q, want %q", got, want)
+	}
+
+	// With an sdram_freq overclock the factory figures stay and the OC follows
+	// after a slash, so both base and OC are visible.
+	got = formatRAMLine(ramSpec{"LPDDR4", 3200, 32}, 3400)
+	want = "3200 / 3400 MT/s (1600 / 1700 MHz), 102.4 Gbit/s / 108.8 Gbit/s (12.8 GB/s / 13.6 GB/s), bus 32 bit (LPDDR4)"
+	if got != want {
+		t.Errorf("formatRAMLine with OC = %q, want %q", got, want)
+	}
+
+	if got := formatRAMLine(ramSpec{}, 0); got != "" {
+		t.Errorf("formatRAMLine empty = %q, want empty", got)
 	}
 }
 
