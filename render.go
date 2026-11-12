@@ -108,14 +108,21 @@ func (r *renderer) renderSystem(s SystemInfo, loc LocaleInfo) {
 		r.kv(L("Серийный номер", "Serial number"), s.Serial)
 	}
 	r.kv(L("Часовой пояс", "Time zone"), s.TimeZone)
+	r.kv(L("Текущее время", "Current time"), fmt.Sprintf("%s (%s)", s.CurrentTime.Format("02.01.2006 15:04:05"), s.TimeZoneOffset))
 	if loc.LangName != "" {
 		r.kv(L("Язык системы", "System language"), fmt.Sprintf("%s (%s)", loc.LangName, loc.LangCode))
 	}
 	if loc.Layouts != "" {
 		r.kv(L("Раскладки клавиатуры", "Keyboard layouts"), keyboardLayouts(loc))
 	}
+	if s.InstallTime != nil {
+		r.kv(L("Время установки", "Install time"), s.InstallTime.Format("02.01.2006 15:04:05"))
+	}
 	r.kv(L("Время загрузки", "Boot time"), s.BootTime.Format("02.01.2006 15:04:05"))
 	r.kv(L("Время работы", "Uptime"), humanDuration(s.Uptime))
+	if s.InternetTime != nil {
+		r.kv(L("Интернет-время", "Internet time"), fmt.Sprintf("%s UTC (%s)", s.InternetTime.Format("02.01.2006 15:04:05"), s.ClockDrift))
+	}
 }
 
 func (r *renderer) renderCPU(c CPUInfo) {

@@ -108,6 +108,21 @@ go vet ./...
   IdleSinceHint are only populated for graphical sessions (`SESSION_TYPE_IS_GRAPHICAL`
   in logind-session.c) and stay `0`/`no` for tty/ssh, so they are useless here.
   `os.FileInfo` does not expose atime — read `syscall.Stat_t.Atim`.
+- Install time comes from the root filesystem's birth time (`statx` with
+  `STATX_BTIME`, field `btime`). ext4/xfs/btrfs record it; older filesystems
+  return no btime (mask bit clear) and then `/etc/machine-id`'s mtime is the
+  fallback (systemd writes it on first boot). `statx` is NOT wrapped by the
+  `syscall` package: call it via `Syscall6` and get `__NR_statx` from a per-arch
+  table (`statxTrapFor`). The numbers DIFFER per arch — s390x is 379, not 291,
+  and ppc64 is 383; a wrong number fails silently. `struct statx` is a fixed
+  256-byte layout, same on every arch (`btime` at offset 0x50).
+- Internet time: query NTP (UDP/123, 48-byte packet, transmit timestamp at
+  bytes 40..48, NTP epoch offset 2208988800) and fall back to an HTTP `Date`
+  header. Estimate drift against the midpoint of the request/response window,
+  not the send time, or half the round trip shows up as skew. `http.Client`
+  follows the `Date` header, which has 1-second resolution — good enough for a
+  drift check, but never claim sub-second precision from it. Bound the whole
+  check with one budget so an offline host cannot stall the report.
 - A remote session with an empty `TTY` is a non-interactive SSH connection
   (`sftp`, `scp`, `rsync`, `ssh -N`); sshd shows it as `user@notty`. It has no
   utmp entry, only a logind session. Label it "SSH without terminal" — the data

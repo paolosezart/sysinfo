@@ -21,6 +21,16 @@ type SystemInfo struct {
 	BootTime      time.Time
 	Uptime        time.Duration
 	TimeZone      string
+	// TimeZoneOffset is the current UTC offset, e.g. "GMT+03:00".
+	TimeZoneOffset string
+	// InstallTime is when the root filesystem was created (best effort).
+	InstallTime *time.Time
+	// CurrentTime is the local clock at collection time.
+	CurrentTime time.Time
+	// InternetTime and ClockDrift are set only when the network time check
+	// succeeds; ClockDrift is local minus server.
+	InternetTime *time.Time
+	ClockDrift   string
 }
 
 func collectSystemInfo() SystemInfo {
@@ -42,8 +52,25 @@ func collectSystemInfo() SystemInfo {
 	}
 	si.BootTime = time.Now().Add(-si.Uptime)
 	si.TimeZone = timeZoneName()
+	si.TimeZoneOffset = zoneOffset(time.Now())
+	si.CurrentTime = time.Now()
+	if t, ok := fileBtime("/"); ok && !t.IsZero() {
+		si.InstallTime = &t
+	} else if fi, err := os.Stat("/etc/machine-id"); err == nil {
+		t := fi.ModTime()
+		si.InstallTime = &t
+	}
 
 	return si
+}
+
+// applyInternetTime fills the internet time fields, best effort. It is kept out
+// of collectSystemInfo so the report never blocks on the network unless asked.
+func applyInternetTime(si *SystemInfo, budget time.Duration) {
+	if t, drift, ok := internetTime(budget); ok {
+		si.InternetTime = &t
+		si.ClockDrift = formatDrift(drift)
+	}
 }
 
 // timeZoneName resolves the IANA zone name (e.g. "Europe/Moscow"). time.Now()'s

@@ -21,6 +21,7 @@ type options struct {
 	demo      bool
 	install   bool
 	sshClient bool
+	inetTime  bool
 	sections  map[string]bool
 }
 
@@ -80,6 +81,9 @@ func main() {
 		report = demoReport()
 	} else {
 		sys := collectSystemInfo()
+		if opts.inetTime {
+			applyInternetTime(&sys, internetTimeBudget)
+		}
 		sessions := collectSessions()
 		if opts.sshClient {
 			attachSSHClientVersions(sessions)
@@ -145,6 +149,7 @@ var (
 	flagSess    = flag.Bool("sessions", false, L("то же, что --users", "same as --users"))
 	flagDbgUtmp = flag.Bool("debug-utmp", false, L("диагностика чтения utmp", "diagnose utmp reading"))
 	flagSSHCli  = flag.Bool("ssh-client", false, L("читать версии SSH-клиентов из системного журнала (нужен LogLevel DEBUG)", "read SSH client versions from the system log (needs LogLevel DEBUG)"))
+	flagTime    = flag.Bool("time", false, L("сверить часы с интернет-временем (NTP/HTTP)", "check the clock against internet time (NTP/HTTP)"))
 )
 
 func parseFlags() options {
@@ -193,6 +198,7 @@ func parseFlags() options {
 		demo:      *demo,
 		install:   *flagInst || *flagI,
 		sshClient: *flagSSHCli,
+		inetTime:  *flagTime,
 		sections:  sections,
 	}
 }
@@ -306,6 +312,7 @@ func printHelp() {
   --demo              ` + L("пример вывода для Raspberry Pi 4B", "sample Raspberry Pi 4B report") + `
   --debug-utmp        ` + L("диагностика чтения сессий (utmp/logind)", "diagnose session reading (utmp/logind)") + `
   --ssh-client        ` + L("версии SSH-клиентов из журнала (нужен LogLevel DEBUG)", "SSH client versions from the log (needs LogLevel DEBUG)") + `
+  --time              ` + L("сверить часы с интернет-временем (NTP/HTTP)", "check the clock against internet time (NTP/HTTP)") + `
   --version           ` + L("версия и сборка", "version and build") + `
   --install, -i       ` + L("установить в /usr/local/bin/sysinfo (авто sudo)", "install as /usr/local/bin/sysinfo (auto sudo)") + `
   --vendor, -v        ` + L("обновить базу USB-вендоров (usb.ids)", "refresh the USB vendor database (usb.ids)") + `
