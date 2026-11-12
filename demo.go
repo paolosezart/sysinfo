@@ -202,6 +202,7 @@ func demoReport() Report {
 			I2CAddr:        0x68,
 			I2CFound:       true,
 			Scanned:        true,
+			OSFRead:        true,
 			OverlayEnabled: true,
 			OverlayParams:  "i2c-rtc,ds3231",
 		},

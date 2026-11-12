@@ -147,6 +147,18 @@ func (r *renderer) renderRTC(rtc RTCInfo) {
 	}
 	if rtc.I2CFound {
 		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), rtc.chipLine())
+		if rtc.OSFRead {
+			state := L("генератор в норме", "oscillator OK")
+			if rtc.OSF {
+				state = L("останов генератора (OSF) — время недостоверно, часы не выставляли",
+					"oscillator stopped (OSF) — time unreliable, the clock was never set")
+			}
+			osfColor := cGreen
+			if rtc.OSF {
+				osfColor = cRed
+			}
+			r.kv(L("Состояние", "State"), r.paint(osfColor, state))
+		}
 	} else if rtc.ScanError != "" {
 		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), r.paint(cDim, rtc.ScanError))
 	} else if rtc.Scanned {
