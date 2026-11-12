@@ -231,20 +231,21 @@ func (r *renderer) renderMemory(m MemoryInfo) {
 	r.kv(L("Свободно", "Available"), humanBytes(m.AvailableKB*1024))
 	r.kv(L("Буферы/кэш", "Buffers/cache"), fmt.Sprintf("%s / %s", humanBytes(m.BuffersKB*1024), humanBytes(m.CachedKB*1024)))
 
-	// RAM type and speed come from SMBIOS or the board model, so note the source.
-	if m.RAMType != "" {
-		typ := m.RAMType
-		if m.RAMSource != "" {
-			typ = fmt.Sprintf("%s (%s)", typ, m.RAMSource)
+	// RAM type and speed: one line, with the type in parentheses and the
+	// overclocked rate (if config.txt sets sdram_freq) after a slash.
+	if m.RAMType != "" || m.RAMSpeedMTs > 0 {
+		val := formatBandwidth(ramBandwidthMbit(m.RAMSpeedMTs, m.RAMBusBits))
+		if oc := formatBandwidth(ramBandwidthMbit(m.RAMOCSpeedMTs, m.RAMBusBits)); oc != "" {
+			if val == "" {
+				val = oc
+			} else {
+				val += " / " + oc
+			}
 		}
-		r.kv(L("Тип памяти", "Memory type"), typ)
-	}
-	if m.RAMSpeedMTs > 0 {
-		r.kv(L("Скорость", "Speed"), fmt.Sprintf("%d MT/s", m.RAMSpeedMTs))
-	}
-	if m.RAMPeakGBs > 0 {
-		r.kv(L("Пропускная способность (пик)", "Bandwidth (peak)"),
-			fmt.Sprintf("%.1f %s", m.RAMPeakGBs, L("ГБ/с", "GB/s")))
+		if m.RAMType != "" {
+			val = strings.TrimSpace(val + " (" + m.RAMType + ")")
+		}
+		r.kv(L("Тип и скорость ОЗУ", "RAM type and speed"), val)
 	}
 
 	// RAM frequency is only exposed on some SoCs; show it when present.

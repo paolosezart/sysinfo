@@ -140,7 +140,9 @@ go vet ./...
   Pi 1-4 and 64-bit for Pi 5. On x86 read SMBIOS type 17 from
   `/sys/firmware/dmi/tables/DMI` (type@0x12, configured speed@0x20, bus
   width@0x0A); the tables are often root-only, so a normal user just gets no
-  value. Peak bandwidth = rate(MT/s) * bus bits / 8.
+  value. Speed is shown as peak bandwidth in bits (rate * bus bits); a
+  `sdram_freq` in config.txt is shown as "base / oc" so the factory spec is
+  never lost.
 - The I2C RTC chip cannot be seen through sysfs once a driver binds the address,
   so probe `/dev/i2c-*` directly with ioctl `I2C_RDWR` (0x0707) using a
   zero-length write (START + address + STOP); a NAK from a missing chip is

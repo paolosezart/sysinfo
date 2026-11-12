@@ -35,23 +35,67 @@ func TestKnownRAM(t *testing.T) {
 	}
 }
 
-func TestRamSpecPeakGBs(t *testing.T) {
+func TestRamBandwidthMbit(t *testing.T) {
 	cases := []struct {
-		spec ramSpec
-		want float64
+		rate, bus int
+		want      float64
 	}{
-		{ramSpec{"LPDDR4", 3200, 32}, 12.8},
-		{ramSpec{"LPDDR4X", 4267, 64}, 34.136},
-		{ramSpec{"LPDDR2", 900, 32}, 3.6},
-		{ramSpec{"DDR4", 2666, 64}, 21.328},
+		{3200, 32, 102400}, // Pi 4: 12.8 GB/s = 102.4 Gbit/s
+		{4267, 64, 273088}, // Pi 5
+		{900, 32, 28800},
+		{2666, 64, 170624},
 	}
 	for _, c := range cases {
-		if got := c.spec.peakGBs(); got < c.want-0.01 || got > c.want+0.01 {
-			t.Errorf("%+v peakGBs = %v, want %v", c.spec, got, c.want)
+		if got := ramBandwidthMbit(c.rate, c.bus); got != c.want {
+			t.Errorf("ramBandwidthMbit(%d, %d) = %v, want %v", c.rate, c.bus, got, c.want)
 		}
 	}
-	if got := (ramSpec{}).peakGBs(); got != 0 {
-		t.Errorf("empty spec peakGBs = %v, want 0", got)
+	if got := ramBandwidthMbit(0, 32); got != 0 {
+		t.Errorf("ramBandwidthMbit with no rate = %v, want 0", got)
+	}
+}
+
+func TestFormatBandwidth(t *testing.T) {
+	old := langCode
+	langCode = "en"
+	defer func() { langCode = old }()
+
+	cases := []struct {
+		mbit float64
+		want string
+	}{
+		{102400, "102.4 Gbit/s"},
+		{28800, "28.8 Gbit/s"},
+		{500, "500 Mbit/s"},
+		{0, ""},
+	}
+	for _, c := range cases {
+		if got := formatBandwidth(c.mbit); got != c.want {
+			t.Errorf("formatBandwidth(%v) = %q, want %q", c.mbit, got, c.want)
+		}
+	}
+}
+
+func TestCollectMemoryOCSpeed(t *testing.T) {
+	// With no /proc/meminfo the byte counters stay zero, but the RAM spec is
+	// still resolved from the board model plus the config.txt overclock.
+	ct := &configTxt{
+		Path:     "/boot/firmware/config.txt",
+		Settings: map[string]string{"sdram_freq": "3400"},
+		Overlays: map[string]bool{},
+	}
+	mi := collectMemoryInfoFor("Raspberry Pi 4 Model B Rev 1.4", ct)
+	if mi.RAMType != "LPDDR4" || mi.RAMSpeedMTs != 3200 {
+		t.Fatalf("base spec = %s/%d, want LPDDR4/3200", mi.RAMType, mi.RAMSpeedMTs)
+	}
+	if mi.RAMOCSpeedMTs != 3400 {
+		t.Errorf("RAMOCSpeedMTs = %d, want 3400", mi.RAMOCSpeedMTs)
+	}
+
+	// A sdram_freq equal to the factory rate is not an overclock.
+	ct.Settings["sdram_freq"] = "3200"
+	if mi := collectMemoryInfoFor("Raspberry Pi 4 Model B Rev 1.4", ct); mi.RAMOCSpeedMTs != 0 {
+		t.Errorf("RAMOCSpeedMTs = %d, want 0 when sdram_freq matches the base rate", mi.RAMOCSpeedMTs)
 	}
 }
 

@@ -31,12 +31,13 @@ type MemoryInfo struct {
 	RAMMaxMHz float64
 
 	// RAMType/Speed/Bus come from SMBIOS or the board model; empty/zero when the
-	// platform does not reveal them.
-	RAMType     string
-	RAMSpeedMTs int
-	RAMBusBits  int
-	RAMPeakGBs  float64
-	RAMSource   string // where the values came from: SMBIOS or the board model
+	// platform does not reveal them. RAMOCSpeedMTs holds the overclocked data
+	// rate when config.txt sets sdram_freq, so both can be shown as "base / oc".
+	RAMType       string
+	RAMSpeedMTs   int
+	RAMOCSpeedMTs int
+	RAMBusBits    int
+	RAMSource     string // where the values came from: SMBIOS or the board model
 }
 
 // SwapDevice is one entry from /proc/swaps.
@@ -62,12 +63,13 @@ type ZramDevice struct {
 }
 
 func collectMemoryInfo() MemoryInfo {
-	return collectMemoryInfoFor("")
+	return collectMemoryInfoFor("", nil)
 }
 
-// collectMemoryInfoFor is collectMemoryInfo with the board model, which is only
-// needed to resolve the RAM type and speed when the platform does not report it.
-func collectMemoryInfoFor(model string) MemoryInfo {
+// collectMemoryInfoFor is collectMemoryInfo with the board model and the parsed
+// config.txt, which are only needed to resolve the RAM type and speed when the
+// platform does not report them.
+func collectMemoryInfoFor(model string, ct *configTxt) MemoryInfo {
 	mi := MemoryInfo{}
 	vals := readMemInfo("/proc/meminfo")
 	mi.TotalKB = vals["MemTotal"]
@@ -93,8 +95,14 @@ func collectMemoryInfoFor(model string) MemoryInfo {
 		mi.RAMType = spec.Type
 		mi.RAMSpeedMTs = spec.SpeedMTs
 		mi.RAMBusBits = spec.BusBits
-		mi.RAMPeakGBs = spec.peakGBs()
 		mi.RAMSource = source
+	}
+	// An explicit sdram_freq in config.txt is the overclocked data rate; it is
+	// shown next to the factory rate rather than replacing it.
+	if ct != nil {
+		if oc := atoiDefault(ct.setting("sdram_freq"), 0); oc > 0 && oc != mi.RAMSpeedMTs {
+			mi.RAMOCSpeedMTs = oc
+		}
 	}
 	return mi
 }

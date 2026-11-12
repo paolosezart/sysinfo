@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -15,13 +16,28 @@ type ramSpec struct {
 	BusBits  int    // bus width in bits
 }
 
-// peakGBs is the theoretical peak bandwidth, in gigabytes per second. Each
-// transfer moves one bus-width word, so rate * width / 8 gives bytes/second.
-func (r ramSpec) peakGBs() float64 {
-	if r.SpeedMTs == 0 || r.BusBits == 0 {
+// ramBandwidthMbit returns the peak bandwidth in megabits per second for a data
+// rate (in MT/s) and a bus width, or 0 when either is unknown. Each transfer
+// moves one bus-width word, so the rate in transfers/s times the width in bits
+// is already a bit rate.
+func ramBandwidthMbit(rateMTs, busBits int) float64 {
+	if rateMTs == 0 || busBits == 0 {
 		return 0
 	}
-	return float64(r.SpeedMTs) * float64(r.BusBits) / 8 / 1000
+	return float64(rateMTs) * float64(busBits)
+}
+
+// formatBandwidth renders a bandwidth given in megabits per second, switching to
+// gigabits per second once it is large enough.
+func formatBandwidth(mbit float64) string {
+	switch {
+	case mbit <= 0:
+		return ""
+	case mbit >= 1000:
+		return fmt.Sprintf("%.1f %s", mbit/1000, L("Гбит/с", "Gbit/s"))
+	default:
+		return fmt.Sprintf("%.0f %s", mbit, L("Мбит/с", "Mbit/s"))
+	}
 }
 
 // knownRAM returns the RAM specification for a recognised board model. Raspberry

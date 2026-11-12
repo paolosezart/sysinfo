@@ -92,7 +92,7 @@ func main() {
 		report = Report{
 			System:    sys,
 			CPU:       collectCPUInfo(),
-			Memory:    collectMemoryInfoFor(sys.BoardModel),
+			Memory:    collectMemoryInfoFor(sys.BoardModel, ct),
 			Storage:   collectFilesystems(),
 			Network:   collectNetworkInfo(),
 			Sensors:   collectSensors(sys),
