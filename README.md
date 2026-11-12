@@ -328,7 +328,8 @@ dmesg | grep -i rtc
 sudo i2cdetect -y 1                              # 0x68 = DS1307/DS3231
 grep -i i2c-rtc /boot/firmware/config.txt
 
-# 2. Посмотреть состояние часов
+# 2. Посмотреть состояние часов (пока OSF поднят, чтение падает с
+#    «ioctl(RTC_RD_TIME) ... Invalid argument» — это тот же симптом)
 sudo hwclock --verbose --show
 
 # 3. Записать системное время в RTC — сбрасывает флаг OSF
