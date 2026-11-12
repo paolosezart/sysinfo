@@ -162,6 +162,9 @@ func (r *renderer) renderRTC(rtc RTCInfo) {
 		}
 		r.kv(L("Синхронизация", "Synchronisation"), r.paint(color, status))
 	}
+	if hint := rtc.statusHint(); hint != "" {
+		r.kv(L("Пояснение", "Note"), r.paint(cDim, hint))
+	}
 }
 
 func (r *renderer) renderSystem(s SystemInfo, loc LocaleInfo) {
@@ -231,10 +234,17 @@ func (r *renderer) renderMemory(m MemoryInfo) {
 	r.kv(L("Свободно", "Available"), humanBytes(m.AvailableKB*1024))
 	r.kv(L("Буферы/кэш", "Buffers/cache"), fmt.Sprintf("%s / %s", humanBytes(m.BuffersKB*1024), humanBytes(m.CachedKB*1024)))
 
-	// RAM type and speed on one line: effective rate with the real clock, peak
-	// bandwidth in bits and bytes, type in parentheses; an overclock follows.
-	if spec := (ramSpec{Type: m.RAMType, SpeedMTs: m.RAMSpeedMTs, BusBits: m.RAMBusBits}); spec.Type != "" || spec.SpeedMTs > 0 {
-		r.kv(L("Тип и скорость ОЗУ", "RAM type and speed"), formatRAMLine(spec, m.RAMOCSpeedMTs))
+	// RAM details split over short lines so the block stays readable in a
+	// narrow SSH/Android terminal. An sdram_freq overclock shows as "base / oc".
+	spec := ramSpec{Type: m.RAMType, SpeedMTs: m.RAMSpeedMTs, BusBits: m.RAMBusBits}
+	if t := formatRAMType(spec); t != "" {
+		r.kv(L("Тип", "Type"), t)
+	}
+	if f := formatRAMFrequency(spec, m.RAMOCSpeedMTs); f != "" {
+		r.kv(L("Частота", "Frequency"), f)
+	}
+	if s := formatRAMSpeed(spec, m.RAMOCSpeedMTs); s != "" {
+		r.kv(L("Скорость", "Speed"), s)
 	}
 
 	// RAM frequency is only exposed on some SoCs; show it when present.
@@ -313,6 +323,18 @@ func (r *renderer) renderStorage(fs []Filesystem) {
 }
 
 func (r *renderer) renderNetwork(n NetworkInfo) {
+	// Vendors already named by a local interface or access point, so the gateway
+	// vendor is not repeated when the gateway is the same box as the AP.
+	localVendors := map[string]bool{}
+	for _, iface := range n.Interfaces {
+		if iface.MACVendor != "" {
+			localVendors[strings.ToLower(iface.MACVendor)] = true
+		}
+		if iface.Wireless != nil && iface.Wireless.BSSIDVendor != "" {
+			localVendors[strings.ToLower(iface.Wireless.BSSIDVendor)] = true
+		}
+	}
+
 	r.header(L("СЕТЬ", "NETWORK"))
 	if len(n.DNSServers) > 0 {
 		r.kv(L("DNS-серверы", "DNS servers"), strings.Join(n.DNSServers, ", "))
@@ -324,11 +346,11 @@ func (r *renderer) renderNetwork(n NetworkInfo) {
 		gw := n.GatewayIP
 		if n.GatewayMAC != "" {
 			gw += "  " + r.paint(cDim, n.GatewayMAC)
-			if n.GatewayVendor != "" {
-				gw += " " + r.paint(cDim, "("+n.GatewayVendor+")")
-			}
 		}
 		r.kv(L("Шлюз", "Gateway"), gw)
+		if v := n.GatewayVendor; v != "" && !localVendors[strings.ToLower(v)] {
+			r.kv(L("Производитель шлюза", "Gateway vendor"), r.paint(cDim, v))
+		}
 	}
 	fmt.Println()
 
@@ -349,11 +371,10 @@ func (r *renderer) renderNetwork(n NetworkInfo) {
 		}
 		fmt.Printf("  %s [%s]  %s\n", r.paint(cBold, iface.Name), kind, state)
 		if iface.MAC != "" {
-			mac := iface.MAC
+			r.kvIndent(L("MAC-адрес", "MAC address"), iface.MAC)
 			if iface.MACVendor != "" {
-				mac += "  " + r.paint(cDim, iface.MACVendor)
+				r.kvIndent(L("Производитель", "Vendor"), iface.MACVendor)
 			}
-			r.kvIndent(L("MAC-адрес", "MAC address"), mac)
 		}
 		for _, ip := range iface.IPv4 {
 			r.kvIndent("IPv4", ip)
@@ -375,6 +396,30 @@ func (r *renderer) renderNetwork(n NetworkInfo) {
 		}
 		fmt.Println()
 	}
+
+	// When a MAC is known but its vendor is not, the local OUI database is
+	// missing the entry (or is absent), so point at the refresh command.
+	if unresolvedVendors(n) {
+		r.kv(L("Вендоры не распознаны", "Vendors unresolved"),
+			r.paint(cDim, L("обновите базу: sysinfo --oui", "refresh the database: sysinfo --oui")))
+	}
+}
+
+// unresolvedVendors reports whether any known MAC lacks a vendor name, which
+// means the local OUI database could not resolve it.
+func unresolvedVendors(n NetworkInfo) bool {
+	if n.GatewayMAC != "" && n.GatewayVendor == "" {
+		return true
+	}
+	for _, iface := range n.Interfaces {
+		if iface.MAC != "" && iface.MACVendor == "" {
+			return true
+		}
+		if iface.Wireless != nil && iface.Wireless.BSSID != "" && iface.Wireless.BSSIDVendor == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // virtualKindLabel maps a virtual interface sub-type to a short bracketed tag.
@@ -425,11 +470,10 @@ func (r *renderer) renderWireless(w *WirelessInfo) {
 		r.kvIndent(L("Точка доступа", "Access point"), r.paint(cDim, L("не подключён", "not connected")))
 	}
 	if w.BSSID != "" {
-		b := w.BSSID
+		r.kvIndent(L("MAC точки доступа", "AP MAC (BSSID)"), w.BSSID)
 		if w.BSSIDVendor != "" {
-			b += "  " + r.paint(cDim, w.BSSIDVendor)
+			r.kvIndent(L("Производитель", "Vendor"), w.BSSIDVendor)
 		}
-		r.kvIndent(L("MAC точки доступа", "AP MAC (BSSID)"), b)
 	}
 	if w.Band != "" {
 		r.kvIndent(L("Диапазон", "Band"), fmt.Sprintf("%s %s, %s %s", w.Band, unitLocal("GHz"), L("канал", "channel"), w.Channel))

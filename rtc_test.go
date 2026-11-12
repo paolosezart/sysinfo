@@ -2,6 +2,52 @@ package main
 
 import "testing"
 
+func TestRTCStatusHint(t *testing.T) {
+	// A fitted, enabled clock that the kernel did not use gets an explanation.
+	r := RTCInfo{I2CFound: true, OverlayEnabled: true, Hctosys: false}
+	if got := r.statusHint(); got == "" {
+		t.Error("fitted-but-unused clock should produce a hint")
+	}
+	// No hint when the clock actually set the system time, is absent, or is off.
+	if got := (RTCInfo{I2CFound: true, OverlayEnabled: true, Hctosys: true}).statusHint(); got != "" {
+		t.Errorf("hctosys set should not produce a hint, got %q", got)
+	}
+	if got := (RTCInfo{I2CFound: false, OverlayEnabled: true}).statusHint(); got != "" {
+		t.Errorf("missing clock should not produce a hint, got %q", got)
+	}
+	if got := (RTCInfo{I2CFound: true, OverlayEnabled: false}).statusHint(); got != "" {
+		t.Errorf("disabled overlay should not produce a hint, got %q", got)
+	}
+}
+
+func TestUnresolvedVendors(t *testing.T) {
+	// All MACs resolved: nothing to warn about.
+	n := NetworkInfo{
+		GatewayMAC:    "aa:bb:cc:dd:ee:ff",
+		GatewayVendor: "Acme",
+		Interfaces: []NetInterface{
+			{MAC: "dc:a6:32:5a:d5:62", MACVendor: "Raspberry Pi Trading Ltd"},
+		},
+	}
+	if unresolvedVendors(n) {
+		t.Error("fully resolved vendors should not warn")
+	}
+	// A known MAC with no vendor means the OUI database missed it.
+	n.Interfaces[0].MACVendor = ""
+	if !unresolvedVendors(n) {
+		t.Error("interface MAC without a vendor should warn")
+	}
+	// An unresolved access point also counts.
+	n = NetworkInfo{
+		Interfaces: []NetInterface{
+			{Wireless: &WirelessInfo{BSSID: "a4:2b:b0:11:22:34"}},
+		},
+	}
+	if !unresolvedVendors(n) {
+		t.Error("access point BSSID without a vendor should warn")
+	}
+}
+
 func TestRTCChipTable(t *testing.T) {
 	if rtcChip[0x68] == "" {
 		t.Error("0x68 (DS1307/DS3231) missing from the chip table")

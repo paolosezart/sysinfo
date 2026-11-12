@@ -153,6 +153,12 @@ go vet ./...
   0x51 (PCF8563), 0x6f (MCP7940x). Reading `/dev/i2c-*` usually needs the `i2c`
   group. `/sys/class/rtc/rtc0/hctosys` is the key status bit: it says whether the
   system clock was set from the RTC at boot (the thing users actually care about).
+  It is a kernel sysfs attribute, NOT a command, so the report must never tell the
+  user to run "hctosys". The kernel calls `rtc_hctosys()` only when the RTC
+  registers and its name equals `CONFIG_RTC_HCTOSYS_DEVICE` (default "rtc0"); a
+  fitted-but-unused clock usually means the driver was not in the initramfs, and
+  `dmesg | grep "setting system clock"` is the confirmation. Keep the wording
+  plain and add the check command rather than a bare "check the setup".
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

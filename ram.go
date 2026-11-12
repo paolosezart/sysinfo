@@ -82,37 +82,44 @@ func pairStr(base, oc float64) string {
 	return numStr(base)
 }
 
-// formatRAMLine builds the single "RAM type and speed" value: the effective rate
-// with the real clock, the peak bandwidth in bits with bytes in parentheses, and
-// the bus width, with the memory type in parentheses. When config.txt sets
-// sdram_freq (an overclock) the factory figures stay and the overclocked ones
-// follow after a slash, so base / OC is always visible.
-func formatRAMLine(spec ramSpec, ocMTs int) string {
-	if spec.Type == "" && spec.SpeedMTs == 0 {
+// formatRAMType renders the memory type and bus width, e.g. "LPDDR4 (шина 32 бит)".
+// The bus width is shown here because it explains the bandwidth figure below.
+func formatRAMType(spec ramSpec) string {
+	if spec.Type == "" {
 		return ""
 	}
-	var parts []string
-	if spec.SpeedMTs > 0 {
-		rate := pairStr(float64(spec.SpeedMTs), float64(ocMTs)) + " MT/s"
-		clock := pairStr(ramClockMHz(spec.SpeedMTs), ramClockMHz(ocMTs))
-		parts = append(parts, fmt.Sprintf("%s (%s %s)", rate, clock, L("МГц", "MHz")))
-	}
-	if bw := ramBandwidthMbit(spec.SpeedMTs, spec.BusBits); bw > 0 {
-		bits, bytes := formatBandwidth(bw), formatBandwidthBytes(bw)
-		if obw := ramBandwidthMbit(ocMTs, spec.BusBits); obw > 0 {
-			bits += " / " + formatBandwidth(obw)
-			bytes += " / " + formatBandwidthBytes(obw)
-		}
-		parts = append(parts, fmt.Sprintf("%s (%s)", bits, bytes))
-	}
 	if spec.BusBits > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d %s", L("шина", "bus"), spec.BusBits, L("бит", "bit")))
+		return fmt.Sprintf("%s (%s %d %s)", spec.Type,
+			L("шина", "bus"), spec.BusBits, L("бит", "bit"))
 	}
-	line := strings.Join(parts, ", ")
-	if spec.Type != "" {
-		line = strings.TrimSpace(line + " (" + spec.Type + ")")
+	return spec.Type
+}
+
+// formatRAMFrequency renders the effective data rate with the real clock, e.g.
+// "3200 MT/s (1600 МГц)". With an overclock the factory and OC values are shown
+// as "base / oc" so the factory spec is never lost.
+func formatRAMFrequency(spec ramSpec, ocMTs int) string {
+	if spec.SpeedMTs <= 0 {
+		return ""
 	}
-	return line
+	rate := pairStr(float64(spec.SpeedMTs), float64(ocMTs)) + " MT/s"
+	clock := pairStr(ramClockMHz(spec.SpeedMTs), ramClockMHz(ocMTs))
+	return fmt.Sprintf("%s (%s %s)", rate, clock, L("МГц", "MHz"))
+}
+
+// formatRAMSpeed renders the peak bandwidth in bits with bytes in parentheses,
+// e.g. "102.4 Гбит/с (12.8 ГБ/с)". With an overclock both figures are shown.
+func formatRAMSpeed(spec ramSpec, ocMTs int) string {
+	bw := ramBandwidthMbit(spec.SpeedMTs, spec.BusBits)
+	if bw <= 0 {
+		return ""
+	}
+	bits, bytes := formatBandwidth(bw), formatBandwidthBytes(bw)
+	if obw := ramBandwidthMbit(ocMTs, spec.BusBits); obw > 0 {
+		bits += " / " + formatBandwidth(obw)
+		bytes += " / " + formatBandwidthBytes(obw)
+	}
+	return fmt.Sprintf("%s (%s)", bits, bytes)
 }
 
 // knownRAM returns the RAM specification for a recognised board model. Raspberry

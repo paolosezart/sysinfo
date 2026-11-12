@@ -69,23 +69,36 @@ func TestFormatRAMLine(t *testing.T) {
 	langCode = "en"
 	defer func() { langCode = old }()
 
+	spec := ramSpec{"LPDDR4", 3200, 32}
+
 	// Pi 4B: LPDDR4-3200, 32-bit bus -> 102.4 Gbit/s = 12.8 GB/s.
-	got := formatRAMLine(ramSpec{"LPDDR4", 3200, 32}, 0)
-	want := "3200 MT/s (1600 MHz), 102.4 Gbit/s (12.8 GB/s), bus 32 bit (LPDDR4)"
-	if got != want {
-		t.Errorf("formatRAMLine Pi4 = %q, want %q", got, want)
+	if got, want := formatRAMType(spec), "LPDDR4 (bus 32 bit)"; got != want {
+		t.Errorf("formatRAMType = %q, want %q", got, want)
+	}
+	if got, want := formatRAMFrequency(spec, 0), "3200 MT/s (1600 MHz)"; got != want {
+		t.Errorf("formatRAMFrequency = %q, want %q", got, want)
+	}
+	if got, want := formatRAMSpeed(spec, 0), "102.4 Gbit/s (12.8 GB/s)"; got != want {
+		t.Errorf("formatRAMSpeed = %q, want %q", got, want)
 	}
 
 	// With an sdram_freq overclock the factory figures stay and the OC follows
 	// after a slash, so both base and OC are visible.
-	got = formatRAMLine(ramSpec{"LPDDR4", 3200, 32}, 3400)
-	want = "3200 / 3400 MT/s (1600 / 1700 MHz), 102.4 Gbit/s / 108.8 Gbit/s (12.8 GB/s / 13.6 GB/s), bus 32 bit (LPDDR4)"
-	if got != want {
-		t.Errorf("formatRAMLine with OC = %q, want %q", got, want)
+	if got, want := formatRAMFrequency(spec, 3400), "3200 / 3400 MT/s (1600 / 1700 MHz)"; got != want {
+		t.Errorf("formatRAMFrequency with OC = %q, want %q", got, want)
+	}
+	if got, want := formatRAMSpeed(spec, 3400), "102.4 Gbit/s / 108.8 Gbit/s (12.8 GB/s / 13.6 GB/s)"; got != want {
+		t.Errorf("formatRAMSpeed with OC = %q, want %q", got, want)
 	}
 
-	if got := formatRAMLine(ramSpec{}, 0); got != "" {
-		t.Errorf("formatRAMLine empty = %q, want empty", got)
+	if got := formatRAMType(ramSpec{}); got != "" {
+		t.Errorf("formatRAMType empty = %q, want empty", got)
+	}
+	if got := formatRAMFrequency(ramSpec{}, 0); got != "" {
+		t.Errorf("formatRAMFrequency empty = %q, want empty", got)
+	}
+	if got := formatRAMSpeed(ramSpec{}, 0); got != "" {
+		t.Errorf("formatRAMSpeed empty = %q, want empty", got)
 	}
 }
 

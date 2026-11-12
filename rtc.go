@@ -188,15 +188,27 @@ func (r RTCInfo) statusLine() string {
 		return L("системные часы синхронизированы с RTC при загрузке",
 			"system clock was set from the RTC at boot")
 	case r.I2CFound && r.OverlayEnabled:
-		return L("плата найдена и включена в config.txt, но hctosys выключен — проверьте настройку",
-			"board found and enabled in config.txt, but hctosys is off — check the setup")
+		return L("часы найдены и включены в config.txt, но ядро не взяло время из RTC при загрузке",
+			"clock found and enabled in config.txt, but the kernel did not take the time from it at boot")
 	case r.I2CFound:
-		return L("плата найдена на шине I2C, но в config.txt не включена (dtoverlay=i2c-rtc)",
-			"board found on the I2C bus but not enabled in config.txt (dtoverlay=i2c-rtc)")
+		return L("часы найдены на шине I2C, но в config.txt не включены (dtoverlay=i2c-rtc)",
+			"clock found on the I2C bus but not enabled in config.txt (dtoverlay=i2c-rtc)")
 	case r.Name != "":
 		return L("RTC обнаружен ядром", "RTC present as seen by the kernel")
 	}
 	return ""
+}
+
+// statusHint explains, for a fitted-but-unused clock, what the kernel flag means
+// and how to check it. "hctosys" is a read-only sysfs attribute (not a command):
+// it is 1 only when the RTC set the system clock at boot.
+func (r RTCInfo) statusHint() string {
+	if r.Hctosys || !r.I2CFound || !r.OverlayEnabled {
+		return ""
+	}
+	return L(
+		"hctosys — это флаг ядра (/sys/class/rtc/rtc0/hctosys), а не команда: 1, если время при загрузке взято из RTC. Обычно часы ставит NTP. Проверка: dmesg | grep -i \"setting system clock\"",
+		"hctosys is a kernel flag (/sys/class/rtc/rtc0/hctosys), not a command: 1 when the boot time came from the RTC. NTP usually sets the clock instead. Check: dmesg | grep -i \"setting system clock\"")
 }
 
 // chipLine renders the detected chip and address, e.g. "DS1307/DS3231 @ 0x68".
