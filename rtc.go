@@ -188,8 +188,8 @@ func (r RTCInfo) statusLine() string {
 		return L("системные часы синхронизированы с RTC при загрузке",
 			"system clock was set from the RTC at boot")
 	case r.I2CFound && r.OverlayEnabled:
-		return L("часы найдены и включены в config.txt, но ядро не взяло время из RTC при загрузке",
-			"clock found and enabled in config.txt, but the kernel did not take the time from it at boot")
+		return L("RTC найден и включён, но время при загрузке взято не из него (hctosys=0)",
+			"RTC fitted and enabled, but the boot time did not come from it (hctosys=0)")
 	case r.I2CFound:
 		return L("часы найдены на шине I2C, но в config.txt не включены (dtoverlay=i2c-rtc)",
 			"clock found on the I2C bus but not enabled in config.txt (dtoverlay=i2c-rtc)")
@@ -200,15 +200,17 @@ func (r RTCInfo) statusLine() string {
 }
 
 // statusHint explains, for a fitted-but-unused clock, what the kernel flag means
-// and how to check it. "hctosys" is a read-only sysfs attribute (not a command):
-// it is 1 only when the RTC set the system clock at boot.
+// and how to read the check command's output. "hctosys" is a read-only sysfs
+// attribute (not a command): it is 1 only when the RTC set the system clock at
+// boot. An empty dmesg match confirms the kernel did not use the RTC, which is
+// the normal case when the time comes from NTP.
 func (r RTCInfo) statusHint() string {
 	if r.Hctosys || !r.I2CFound || !r.OverlayEnabled {
 		return ""
 	}
 	return L(
-		"hctosys — это флаг ядра (/sys/class/rtc/rtc0/hctosys), а не команда: 1, если время при загрузке взято из RTC. Обычно часы ставит NTP. Проверка: dmesg | grep -i \"setting system clock\"",
-		"hctosys is a kernel flag (/sys/class/rtc/rtc0/hctosys), not a command: 1 when the boot time came from the RTC. NTP usually sets the clock instead. Check: dmesg | grep -i \"setting system clock\"")
+		"hctosys — это флаг ядра, не команда. Пустой вывод «dmesg | grep -i \"setting system clock\"» подтверждает, что ядро время из RTC не брало; обычно его ставит NTP. Это не ошибка. Чтобы время бралось из RTC до сети, нужен драйвер rtc_ds1307 в initramfs (см. README).",
+		"hctosys is a kernel flag, not a command. An empty \"dmesg | grep -i 'setting system clock'\" confirms the kernel did not take the time from the RTC; NTP usually sets it. This is not a fault. To take the time from the RTC before the network, the rtc_ds1307 driver must be in the initramfs (see README).")
 }
 
 // chipLine renders the detected chip and address, e.g. "DS1307/DS3231 @ 0x68".

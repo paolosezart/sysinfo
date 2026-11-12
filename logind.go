@@ -31,6 +31,8 @@ type logindSession struct {
 	Desktop    string
 	Leader     int
 	Timestamp  string
+	IdleHint   bool   // logind's own idle flag (graphical sessions)
+	IdleSince  string // IdleSinceHint, microseconds since the epoch ("0" unset)
 }
 
 // collectLogindSessions returns the login sessions known to systemd-logind.
@@ -92,6 +94,10 @@ func parseLogindBlock(block string) logindSession {
 			s.Leader, _ = strconv.Atoi(value)
 		case "Timestamp":
 			s.Timestamp = value
+		case "IdleHint":
+			s.IdleHint = value == "yes"
+		case "IdleSinceHint":
+			s.IdleSince = value
 		}
 	}
 	return s
@@ -129,8 +135,39 @@ func logindToSession(s logindSession) (SessionInfo, bool) {
 		si.ConnType = "local"
 		si.Detail = sessionDesktop(s)
 	}
-	si.Idle = ttyIdle(si.Line)
+	si.Idle = sessionIdle(s, si.Line)
 	return si, true
+}
+
+// sessionIdle reports how long the session has been idle. A graphical session
+// never writes to its virtual terminal, so the tty access time stays at the
+// login moment and would report "idle since login" (i.e. the uptime) even while
+// the user works with GUI apps. For those sessions logind's own hint is used
+// instead: IdleHint is set by the desktop, and IdleSinceHint is the microsecond
+// timestamp when it went idle. A graphical session in use has IdleHint=no, so no
+// idle is shown rather than a wrong figure. tty/ssh sessions keep the access-time
+// measure, which is what `w` uses.
+func sessionIdle(s logindSession, line string) string {
+	if s.Type == "x11" || s.Type == "wayland" {
+		if !s.IdleHint {
+			return ""
+		}
+		if t, ok := parseIdleSince(s.IdleSince); ok {
+			return idleSince(t, time.Now())
+		}
+		return ""
+	}
+	return ttyIdle(line)
+}
+
+// parseIdleSince converts the logind IdleSinceHint property to a time. loginctl
+// prints it as microseconds since the epoch, with "0" meaning "not set".
+func parseIdleSince(v string) (time.Time, bool) {
+	usec, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	if err != nil || usec <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(usec/1_000_000, (usec%1_000_000)*1_000), true
 }
 
 // sessionDesktop describes a local session for display: the desktop name for a

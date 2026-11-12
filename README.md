@@ -282,8 +282,42 @@ dmesg | grep -i "setting system clock"
 Если часы найдены и включены, но время из них не берётся, ядру нужно, чтобы
 драйвер был встроен в initramfs, — иначе к моменту загрузки он ещё не
 загружен. Для DS3231 обычно достаточно `dtoverlay=i2c-rtc,ds3231` в
-`/boot/firmware/config.txt`; при проблемах помогает добавление модуля
-`rtc_ds1307` в `/etc/initramfs-tools/modules` и `update-initramfs -u`.
+`/boot/firmware/config.txt`; при проблемах помогает добавление модулей в
+initramfs:
+
+```sh
+# 1. Убедиться, что часы на батарейке и идут верно
+sudo hwclock --verbose --show
+
+# 2. Убедиться, что оверлей включён
+grep -i i2c-rtc /boot/firmware/config.txt
+
+# 3. Добавить модули RTC (контроллер I2C + микросхема) в initramfs
+echo "i2c_bcm2835" | sudo tee -a /etc/initramfs-tools/modules
+echo "rtc_ds1307"  | sudo tee -a /etc/initramfs-tools/modules
+
+# 4. Пересобрать initramfs
+sudo update-initramfs -u
+
+# 5. Убедиться, что прошивка грузит initramfs (в config.txt должно быть auto_initramfs=1)
+grep -i auto_initramfs /boot/firmware/config.txt
+
+# 6. Перезагрузиться и проверить
+sudo reboot
+cat /sys/class/rtc/rtc0/hctosys                    # ожидаем 1
+sudo dmesg | grep -i "setting system clock"
+```
+
+Важно: `hctosys=0` — это **не ошибка**. Если время верное (его выставил NTP),
+всё в порядке: флаг говорит лишь о том, что на этот раз ядро не брало время из
+RTC. Штатно Raspberry Pi OS и так восстанавливает время через `fake-hwclock`, а
+затем уточняет его по NTP. Правки с initramfs нужны, только если часы должны
+идти верно **до** появления сети (офлайн-плата).
+
+Обратите внимание: на Debian и Raspberry Pi OS `dmesg` читается без `sudo`
+(ограничение `kernel.dmesg_restrict` по умолчанию выключено), поэтому пустой
+вывод означает, что ядро действительно не брало время из RTC. Если вы видите
+ошибку доступа, а не пустоту, повторите с `sudo`.
 
 Для опроса I2C нужен доступ на чтение `/dev/i2c-*` (обычно группа `i2c`); без
 него строка о плате часов показывает причину, а остальное работает как есть.

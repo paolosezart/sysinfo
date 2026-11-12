@@ -158,7 +158,16 @@ go vet ./...
   registers and its name equals `CONFIG_RTC_HCTOSYS_DEVICE` (default "rtc0"); a
   fitted-but-unused clock usually means the driver was not in the initramfs, and
   `dmesg | grep "setting system clock"` is the confirmation. Keep the wording
-  plain and add the check command rather than a bare "check the setup".
+  plain and add the check command rather than a bare "check the setup". On Debian
+  and Raspberry Pi OS unprivileged `dmesg` works (SECURITY_DMESG_RESTRICT defaults
+  to n), so an empty match means the kernel really did not use the RTC; only a
+  permission error needs sudo.
+- Idle time has two sources. `w`-style tty sessions use the tty device atime
+  (`ttyIdle`). A graphical session never writes to its VT, so the atime freezes at
+  the login moment and the idle would equal the uptime — wrong. For x11/wayland
+  use logind's `IdleHint`/`IdleSinceHint` instead: show an idle only when
+  IdleHint=yes, otherwise show nothing. IdleSinceHint is microseconds since the
+  epoch, "0" meaning unset (`parseIdleSince`).
 
 ## Conventions
 - Output is bilingual (ru/en); every user-facing string goes through `L(ru, en)`

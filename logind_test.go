@@ -205,6 +205,45 @@ func TestLogindFiltersNonUserSessions(t *testing.T) {
 	}
 }
 
+// parseIdleSince converts logind's microsecond timestamp; "0" (unset) and
+// garbage must be rejected rather than rendered as 1970.
+func TestParseIdleSince(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"1762901972000000", true},
+		{"0", false},
+		{"", false},
+		{"[not set]", false},
+		{"abc", false},
+	}
+	for _, c := range cases {
+		got, ok := parseIdleSince(c.in)
+		if ok != c.want {
+			t.Errorf("parseIdleSince(%q) ok = %v, want %v", c.in, ok, c.want)
+			continue
+		}
+		if ok && got.Unix() <= 0 {
+			t.Errorf("parseIdleSince(%q) = %v, want a real time", c.in, got)
+		}
+	}
+}
+
+// A graphical session must not report "idle since login": the tty atime never
+// moves while the user works in the GUI, so logind's hint is the only sane
+// source. In use (IdleHint=no) it must show no idle at all.
+func TestSessionIdleGraphical(t *testing.T) {
+	inUse := logindSession{Type: "x11", IdleHint: false, IdleSince: "1762901972000000"}
+	if got := sessionIdle(inUse, "tty1"); got != "" {
+		t.Errorf("graphical session in use: idle = %q, want empty", got)
+	}
+	idle := logindSession{Type: "x11", IdleHint: true, IdleSince: "1762901972000000"}
+	if got := sessionIdle(idle, "tty1"); got == "" {
+		t.Error("graphical session marked idle should report an idle time")
+	}
+}
+
 func TestParseLogindTimestamp(t *testing.T) {
 	cases := []struct {
 		in   string
