@@ -154,14 +154,23 @@ go vet ./...
   group. `/sys/class/rtc/rtc0/hctosys` is the key status bit: it says whether the
   system clock was set from the RTC at boot (the thing users actually care about).
   It is a kernel sysfs attribute, NOT a command, so the report must never tell the
-  user to run "hctosys". The kernel calls `rtc_hctosys()` only when the RTC
-  registers and its name equals `CONFIG_RTC_HCTOSYS_DEVICE` (default "rtc0"); a
-  fitted-but-unused clock usually means the driver was not in the initramfs, and
-  `dmesg | grep "setting system clock"` is the confirmation. Keep the wording
-  plain and add the check command rather than a bare "check the setup". On Debian
-  and Raspberry Pi OS unprivileged `dmesg` works (SECURITY_DMESG_RESTRICT defaults
-  to n), so an empty match means the kernel really did not use the RTC; only a
-  permission error needs sudo.
+  user to run "hctosys". The kernel calls `rtc_hctosys()` when an RTC registers and
+  its name equals `CONFIG_RTC_HCTOSYS_DEVICE` (default "rtc0"). Raspberry Pi
+  kernels set `CONFIG_RTC_HCTOSYS=y` (verified in the shipped
+  `config-6.18.50+rpt-rpi-v8`), and since Linux 5.5 modular drivers are covered
+  too, so a missing initramfs entry is NOT the cause of `hctosys=0`. `rtc_hctosys()`
+  prints "setting system clock to ..." whenever the read succeeds, even if
+  `do_settimeofday64()` then rejects a backward jump, so an empty
+  `dmesg | grep "setting system clock"` means `rtc_read_time()` failed. For DS3231
+  that failure is the OSF bit (register 0x0F, bit 7): `ds1307_get_time()` returns
+  -EINVAL silently while OSF is set, and `ds1307_probe()` only warns ("SET TIME!"),
+  clearing it needs a time write (`hwclock --systohc`). Userspace sync
+  (`hwclock --hctosys`, fake-hwclock, systemd) never sets the kernel flag, so
+  `hctosys=0` with a correct clock is not a fault. Keep the wording plain and add
+  the check command rather than a bare "check the setup". On Debian and Raspberry
+  Pi OS unprivileged `dmesg` works (SECURITY_DMESG_RESTRICT defaults to n), so an
+  empty match means the kernel really did not use the RTC; only a permission error
+  needs sudo.
 - Idle time has two sources. `w`-style tty sessions use the tty device atime
   (`ttyIdle`). A graphical session never writes to its VT, so the atime freezes at
   the login moment and the idle would equal the uptime — wrong. For x11/wayland

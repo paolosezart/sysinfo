@@ -20,6 +20,45 @@ func TestRTCStatusHint(t *testing.T) {
 	}
 }
 
+func TestRTCStatusHintOSF(t *testing.T) {
+	// A set oscillator-stop flag must be reported as the likely cause, and the
+	// wording must differ from the generic "NTP sets the time" explanation.
+	generic := RTCInfo{I2CFound: true, OverlayEnabled: true}
+	osf := RTCInfo{I2CFound: true, OverlayEnabled: true, OSF: true, OSFRead: true}
+	if got := osf.statusHint(); got == "" {
+		t.Fatal("OSF should produce a hint")
+	}
+	if osf.statusHint() == generic.statusHint() {
+		t.Error("OSF hint should differ from the generic hint")
+	}
+	// OSF cleared: fall back to the generic explanation.
+	if got := (RTCInfo{I2CFound: true, OverlayEnabled: true, OSFRead: true}).statusHint(); got != generic.statusHint() {
+		t.Error("cleared OSF should give the generic hint")
+	}
+	// OSF bit known but the clock did set the system time: no hint at all.
+	if got := (RTCInfo{I2CFound: true, OverlayEnabled: true, OSF: true, OSFRead: true, Hctosys: true}).statusHint(); got != "" {
+		t.Errorf("hctosys set should suppress the OSF hint, got %q", got)
+	}
+}
+
+func TestRTCReadOSFAddressGate(t *testing.T) {
+	// readOSF only reads the DS1307/DS3231 register; for other chips (e.g. the
+	// PCF8563 at 0x51) it must leave the flag untouched and not open any device.
+	for _, addr := range []uint8{0x51, 0x6f, 0xa2} {
+		r := RTCInfo{I2CBus: "/dev/definitely-not-a-bus", I2CAddr: addr, I2CFound: true}
+		r.readOSF()
+		if r.OSFRead || r.OSF {
+			t.Errorf("addr 0x%02x should not be probed for OSF: %+v", addr, r)
+		}
+	}
+	// A missing bus for a DS3231 must fail quietly (no panic, flag unset).
+	r := RTCInfo{I2CBus: "/dev/definitely-not-a-bus", I2CAddr: 0x68, I2CFound: true}
+	r.readOSF()
+	if r.OSFRead {
+		t.Errorf("unreadable bus should leave OSFRead false: %+v", r)
+	}
+}
+
 func TestUnresolvedVendors(t *testing.T) {
 	// All MACs resolved: nothing to warn about.
 	n := NetworkInfo{
