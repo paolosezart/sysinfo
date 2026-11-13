@@ -171,6 +171,13 @@ go vet ./...
   Pi OS unprivileged `dmesg` works (SECURITY_DMESG_RESTRICT defaults to n), so an
   empty match means the kernel really did not use the RTC; only a permission error
   needs sudo.
+- The RTC stores UTC; the timezone lives in `/etc/localtime`+`/etc/timezone` and is
+  applied only for display, so the clock never needs a zone set on it. `hwclock`
+  learns UTC-vs-local from `/etc/adjtime` (third line, default `UTC`). Offline
+  time: the kernel reads the RTC once at boot (and resume) only when `hctosys=1`;
+  otherwise `fake-hwclock` (`/etc/fake-hwclock.data`) restores the last-shutdown
+  time and NTP corrects it. So a correct clock with no network needs a healthy
+  RTC (no OSF) AND `hctosys=1` after a reboot.
 - Idle time has two sources. `w`-style tty sessions use the tty device atime
   (`ttyIdle`). A graphical session never writes to its VT, so the atime freezes at
   the login moment and the idle would equal the uptime — wrong. For x11/wayland

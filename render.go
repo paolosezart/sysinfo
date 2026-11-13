@@ -143,7 +143,7 @@ func (r *renderer) renderRTC(rtc RTCInfo) {
 		r.kv(L("Устройство", "Device"), rtc.Device)
 	}
 	if rtc.Date != "" {
-		r.kv(L("Время RTC", "RTC time"), strings.TrimSpace(rtc.Date+" "+rtc.Time))
+		r.kv(L("Время RTC (UTC)", "RTC time (UTC)"), strings.TrimSpace(rtc.Date+" "+rtc.Time))
 	}
 	if rtc.I2CFound {
 		r.kv(L("Плата часов (I2C)", "Clock board (I2C)"), rtc.chipLine())

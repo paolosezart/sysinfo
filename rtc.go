@@ -266,8 +266,8 @@ func (r RTCInfo) statusHint() string {
 			"Likely cause: the clock has the OSF flag set — its oscillator stopped (flat battery, or the clock was never set). While it is set the driver does not hand a time to the kernel, so hctosys=0. Set the clock once: sudo hwclock --systohc, then reboot. Check the CR2032 cell — often flat on the ZS-042 board. In dmesg this shows as \"rtc-ds1307 ... SET TIME!\".")
 	}
 	return L(
-		"hctosys — это флаг ядра, не команда. Пустой вывод «dmesg | grep -i \"setting system clock\"» подтверждает, что ядро время из RTC не брало; обычно его ставит NTP. Это не ошибка.",
-		"hctosys is a kernel flag, not a command. An empty \"dmesg | grep -i 'setting system clock'\" confirms the kernel did not take the time from the RTC; NTP usually sets it. This is not a fault.")
+		"hctosys — это флаг ядра, не команда. Он равен 1, только если время из RTC взяло само ядро при загрузке. 0 — обычное дело, когда время ставит NTP или fake-hwclock; сами часы при этом исправны. Если время нужно до появления сети, добейтесь hctosys=1: после установки часов (hwclock --systohc) нужна перезагрузка, затем «dmesg | grep -i rtc».",
+		"hctosys is a kernel flag, not a command. It is 1 only when the kernel itself took the time from the RTC at boot. 0 is normal when NTP or fake-hwclock sets the clock; the RTC is still fine. If you need the time before the network, get hctosys=1: after setting the clock (hwclock --systohc) a reboot is required, then check \"dmesg | grep -i rtc\".")
 }
 
 // chipLine renders the detected chip and address, e.g. "DS1307/DS3231 @ 0x68".
